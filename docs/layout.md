@@ -37,9 +37,12 @@ writer never puts anything under `sessions/` or `changes/` that is not.
   derived, so no native id or path appears in a key.
 - **content_hash** = `sha256(source + "\n" + body)` where `body` joins the
   trace's events as `role + "\x1f" + text` with `"\x1e"`. Timestamps are
-  outside the hash, so a re-export of the same conversation dedupes. The exact
-  derivation of events and `text` is in [`src/trace/parse.ts`](../src/trace/parse.ts),
-  pinned by the goldens in `testdata/goldens/`.
+  outside the hash, so a re-export of the same conversation dedupes. A
+  continuation hashes `source + "@" + from_record` in place of `source`: the
+  same words at two places in one session are two traces, and a tail sent
+  again from the same place is one. The exact derivation of events and `text`
+  is in [`src/trace/parse.ts`](../src/trace/parse.ts), pinned by the goldens
+  in `testdata/goldens/`.
 - **stamp** in a change key is RFC 3339 UTC to the millisecond with `-` and
   `:` removed (`20261021T210405.123Z`), so keys sort by time and are valid
   file names everywhere.
@@ -75,7 +78,6 @@ later publish does not overwrite it, whatever differs outside the hash.
     "cwd": "/repo/app", "git_branch": "main", "model": "…",   // from the meta record
     "parent_session_id": "…",                                 // lineage, when known at first publish
     "continuation": { "from_record": 6, "prefix_sha256": "…" },
-    "trace_context": { "trace_id": "…", "span_id": "…" },
     "normalizer": { "name": "sessiondb-server", "version": "0.1.0+trajectory.0.3.0" }
   }
 }
@@ -109,28 +111,47 @@ empty `traces`, and no `head` or `source`, and never appears in `changes/`.
     { "content_hash": "…", "created_at": "…", "records": 5,
       "continuation": { "from_record": 6, "prefix_sha256": "…" } }
   ],
-  "raw": [ { "part": 0, "format": "jsonl", "size": 1234, "sha256": "…", "created_at": "…" } ],
+  "raw": [
+    { "part": 0, "format": "jsonl", "size": 1234, "sha256": "…", "created_at": "…",
+      "offset": 0, "length": 48213 },           // where the part sits in the log
+    { "part": 1, "format": "jsonl", "size": 300, "sha256": "…", "created_at": "…",
+      "offset": 48213, "length": 9120 }
+  ],
   "raw_format": "jsonl",
+  "normalized": {                    // the chunk state: absent until a part was normalized
+    "bytes": 57333,                  // of the log normalized so far: where the next chunk starts
+    "records": 15, "prefix_sha256": "…",   // the whole session's, so far
+    "hash_state": "…"                // the prefix hash mid-stream, for the next chunk to extend
+  },
   "created_at": "…", "updated_at": "…"
 }
 ```
 
 A session that grew after it was stored gets a second trace with a
 `continuation`: the tail's records, hashed on their own, plus where in the
-full session they start and a hash of what came before. A reader that wants
-the whole session concatenates in `traces` order.
+full session they start and a hash of what came before. A tail is judged
+as part of the session, not as a conversation of its own: one that is all
+tool traffic is a trace like any other. A reader that wants
+the whole session concatenates in `traces` order. Whether the growth came as
+a whole upload with `shipped` or as a chunk, the trace is the same.
 
 ### `raw.<n>.<format>.gz`
 
 The native transcript, redacted line by line (`jsonl`) or as a document
 (`json`), gzipped. The first object written for a session, and what every
-trace is made from: the server normalizes the stored part, not the bytes on
+trace is made from: the server normalizes the stored parts, not the bytes on
 the wire, so the trace can be remade from the bucket alone when adapters
 improve. It is the log as the harness wrote it, before the server's
 per-source fixups, so a re-normalization must run the server's
 `normalizeTranscript` (fixups included), not the adapter alone.
-Part-numbered: the same bytes at the same part are a no-op, different bytes
-replace.
+
+A whole upload is part 0 and the only part; a log sent in chunks has one part
+per chunk, each saying where it sits in the log (`offset`, `length`: the
+log's bytes before redaction, which can shorten what is stored), and the
+parts in `offset` order, concatenated, are the log. The same bytes at the
+same part are a no-op, different bytes replace; a whole upload removes every
+other part. `offset` and `length` are absent on parts stored before chunks
+were, and such a session takes a whole upload before it can take a chunk.
 
 ### `changes/<stamp>-<hash|tombstone>.json` — `sessionstorage/change/1`
 
@@ -149,8 +170,8 @@ laptop clocks.
 
 1. Write the object. For a trace, skip if the key exists.
 2. Verify: compare the backend's ETag to the body's MD5 when the ETag is a
-   plain MD5 (single-part PUT on S3, R2, MinIO, and the `fs` store); otherwise
-   read the object back and compare hashes.
+   plain MD5 (single-part PUT on S3, R2, MinIO); otherwise (the `fs` store, a
+   multipart upload) read the object back and compare hashes.
 3. Rewrite `metadata.json`.
 4. Append the change entry.
 

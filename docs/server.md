@@ -110,12 +110,14 @@ Request bodies may be `Content-Encoding: gzip`. Every route but `/healthz` wants
   "branch": "main",                // the client's best guess; the transcript's own record wins
   "parent_session_id": "…",        // the session this one was resumed or forked from
   "fork_of": "…",                  // a fork: the parent whose history this log begins with
-  "shipped": { "records": 12, "prefix_sha256": "…" }    // what the last answer said; see below
+  "shipped": { "records": 12, "prefix_sha256": "…" },   // what the last answer said; see below
+  "offset": 0                      // where `transcript` starts in the log: 0 for the whole log
+                                   // (the default), else a chunk from there; see "In chunks"
 }
 ```
 
 The server redacts the transcript and stores it as the session's raw part, part 0, replacing
-the one before (the raw copy is always the whole current log). That creates the session. It then
+the parts before (a whole upload is the whole current log). That creates the session. It then
 normalizes what it stored, redacts the records, and decides:
 
 - **Worth a trace?** Under 2000 characters of conversation (or no user turn, or nothing
@@ -135,20 +137,62 @@ trivial:
 
 ```json
 { "status": "stored", "archive_id": "…", "content_hash": "…", "session_id": "…",
-  "records": 3, "events": 2, "records_total": 7, "prefix_sha256": "…",
+  "records": 3, "events": 2, "records_total": 7, "prefix_sha256": "…", "bytes_total": 48213,
   "raw": { "status": "stored", "part": 0 } }
 ```
 
 `records` is what this upload wrote; `records_total` and `prefix_sha256` describe the whole
-normalized session and are what the client stores as `shipped` for next time (every status
-returns them, `trivial` included). `raw.status` is `stored` or `exists` (the same bytes were
-already part 0).
+normalized session and are what the client stores as `shipped` for next time; `bytes_total` is
+how much of the log the server now holds, where the next chunk starts (every status returns
+them, `trivial` included). `raw.status` is `stored` or `exists` (the same bytes were already
+stored as that part).
 
 `422` with a code is final for that upload (resending the same bytes cannot succeed):
 `unsupported_agent`, `too_large` (the transcript is over the raw-part cap; nothing is stored),
-`redacted`, and after the raw part is stored, `empty` (no conversation), `normalize_<code>`,
-`invalid`: the raw part stays for a later normalizer. `502 storage_error` is the bucket failing
-and is retryable.
+`redacted`, `empty` (a blank transcript), `bad_chunk`, and after the raw part is stored,
+`normalize_<code>`, `invalid`: the raw part stays for a later normalizer. A log the adapter
+reads but finds no conversation in yet (a session that has only started) is `trivial`, not an
+error. `502 storage_error` is the bucket failing and is retryable.
+
+#### In chunks
+
+A session's log only grows while the session runs (every harness appends a line per event), and
+a client need not send the whole of it each time: it sends the bytes past what the server has.
+
+```jsonc
+{ "agent": "claude-code", "session_id": "…",
+  "transcript": "<the log from byte 48213 on, whole lines>",
+  "offset": 48213 }                // the bytes_total of the last answer
+```
+
+`offset` must be the session's `bytes_total` (what the last answer said; the session's
+`metadata.json` holds it as `normalized.bytes`), else `409 offset_mismatch` with `expected` in
+the error and nothing stored: the client resends from `expected`, or from 0 (the whole log)
+when it no longer has that. A chunk is whole lines of a `jsonl` log (it ends with a line
+break; an OpenCode `json` export cannot be chunked): `422 bad_chunk` otherwise. The first upload
+of a session is the whole log (`offset` 0); a chunk for a session the server does not have gets
+`409` with `expected: 0`.
+
+A chunk is stored as its own raw part, normalized on its own (the records those lines stand
+for), and written as a continuation of the session's trace: the meta record plus the chunk's
+records, marked with where they start, exactly what a whole upload with `shipped` would have
+written for the same growth. The server keeps what the continuation needs between chunks
+(bytes covered, records so far, the prefix hash mid-stream), so a chunk sends no `shipped`;
+`records_total` and `prefix_sha256` in the answer are still the whole session's, so a client
+can go back to whole uploads with `shipped` and still be continued. A chunk with no records in
+it (progress and transport lines) moves `bytes_total` on and ships nothing (`200 trivial`).
+
+Whether a session is worth a trace is decided once: until it has one, each chunk is stored and
+the chunks so far are normalized together as the whole log and judged the way a whole upload
+is (`trivial` until there is a conversation of substance); once it has one, every chunk with
+records in it ships. A whole upload (`offset` 0) after chunks replaces every part with the
+log it carries and starts the chunk state over; a chunk past a part that failed to normalize
+replaces that part.
+
+The cut between chunks is the client's: a line boundary, anywhere. A log that the harness
+rewrote in place (Claude Code and Codex rewrite nothing; a harness that compacts its history
+might) is the client's to notice, by keeping a hash of what it sent: a whole upload then
+dedupes by content as before.
 
 `agent` is part of the archive id (`sha256(owner, agent, session_id)`), which is why only the
 trajectory source name is accepted (`claude-code`, not `claude`): one spelling, one archive.
@@ -166,8 +210,8 @@ one more transcript format, normalized to trajectory-v1 by the server's own adap
 Two ways a file in that format gets in:
 
 - Posted, as `POST /v1/sessions` with `agent: "datadog-trajectory"` and the file as
-  `transcript`. A file with no `session_end` is a session that was still running when it was
-  copied; it normalizes to what it has so far.
+  `transcript`, whole or [in chunks](#in-chunks). A file with no `session_end` is a session
+  that was still running when it was copied; it normalizes to what it has so far.
 - Found in the bucket: the owner's Trajectory directory synced under their folder, below.
 
 The session is filed as `agent: datadog-trajectory` and its trace's `source` names the client
@@ -197,14 +241,21 @@ aws s3 sync ~/.trajectory s3://bucket/prefix/owners/alice/.trajectory
 At boot and every `SESSIONDB_SCAN_INTERVAL` seconds (default 300) the server lists each
 owner's folder, for every owner it has a token for, and reads every `session-<id>.jsonl` it
 finds anywhere under it: Trajectory's own naming, so the directory can land at any subpath.
-A finished file goes through the same pipeline a POST does (a redacted copy as the session's
-raw part, then the trace from it), filed under `agent: datadog-trajectory` with `source:
-datadog-trajectory:<client>`; a file without `session_end` is a session that was still running
-when it was synced, and is left for the scan after the sync rewrites it. The synced files are never touched, so `aws s3 sync` keeps
-working, and a file is read once per version (the server remembers each key's ETag), so an
-unchanged file costs a `stat` per scan. A restart reads everything once more and, because the
-content hash dedupes, writes nothing new. What a scan did is in the server log, one line per
-stored, trivial or rejected file and a summary per scan that read anything.
+Each file goes through the same pipeline a POST does (a redacted copy as a raw part of the
+session, then the trace from it), filed under `agent: datadog-trajectory` with `source:
+datadog-trajectory:<client>`.
+
+A session's file grows with each sync while the session runs, and the scan reads only what
+grew: the session's `metadata.json` says how many of the file's bytes were normalized, the
+bytes past that are read with a range request, and they go in [as a chunk](#in-chunks), a
+continuation of the session's trace. So a running session is in the archive as it goes (a
+session with only a prompt so far is `trivial` until an answer arrives), each scan costs what
+was appended since the last one, and a restart picks up where the archive says rather than
+reading everything again. A file that shrank was rewritten and is read whole again; its content
+dedupes. The synced files are never touched, so `aws s3 sync` keeps working, and the server
+remembers each key's ETag, so an unchanged file costs a `stat` per scan. What a scan did is in
+the server log, one line per stored, trivial or rejected file and a summary per scan that read
+anything.
 
 A session the daemon imported from a client's own history (`trajectory session import`) is
 thinner than one it captured live: no prose from the agent, and tool calls present only as

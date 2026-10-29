@@ -1,14 +1,26 @@
 /** A directory as a `Store`: the local target, and what tests use. Writes are temp + rename so a
- * reader never sees a partial object; the ETag is the body's MD5, as S3 reports it. */
+ * reader never sees a partial object. The ETag is the file's size and mtime, not an MD5: a
+ * `stat` must not read the file (the scanner stats every synced session file on every pass), so
+ * `publish` verifies a write here by reading it back. */
 
-import { createHash, randomBytes } from "node:crypto";
-import { mkdir, readdir, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import {
+  mkdir,
+  open,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  stat,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
+  type GetOptions,
   type ListOptions,
   type ListResult,
-  ObjectExistsError,
   type ObjectStat,
   type PutOptions,
   type Store,
@@ -36,18 +48,34 @@ export class FsStore implements Store {
     return join(this.root, ...key.split("/"));
   }
 
-  async get(key: string): Promise<Uint8Array | null> {
+  async get(key: string, options: GetOptions = {}): Promise<Uint8Array | null> {
+    const { range } = options;
     try {
-      return new Uint8Array(await readFile(this.pathOf(key)));
+      if (!range) return new Uint8Array(await readFile(this.pathOf(key)));
+      const file = await open(this.pathOf(key), "r");
+      try {
+        const size = (await file.stat()).size;
+        const start = Math.min(range.start, size);
+        const end = Math.min(range.end ?? size, size);
+        const out = new Uint8Array(Math.max(end - start, 0));
+        let read = 0;
+        while (read < out.length) {
+          const { bytesRead } = await file.read(out, read, out.length - read, start + read);
+          if (bytesRead === 0) break;
+          read += bytesRead;
+        }
+        return out.subarray(0, read);
+      } finally {
+        await file.close();
+      }
     } catch (err) {
       if (isNotFound(err)) return null;
       throw new StoreError(`read ${key}`, err);
     }
   }
 
-  async put(key: string, body: Uint8Array, options: PutOptions = {}): Promise<void> {
+  async put(key: string, body: Uint8Array, _options: PutOptions = {}): Promise<void> {
     const path = this.pathOf(key);
-    if (options.ifNoneMatch && (await this.stat(key)) !== null) throw new ObjectExistsError(key);
     const tmp = `${path}.${randomBytes(6).toString("hex")}.tmp`;
     try {
       await mkdir(dirname(path), { recursive: true });
@@ -62,12 +90,9 @@ export class FsStore implements Store {
   async stat(key: string): Promise<ObjectStat | null> {
     const path = this.pathOf(key);
     try {
-      const info = await stat(path);
+      const info = await stat(path, { bigint: true });
       if (!info.isFile()) return null;
-      const etag = createHash("md5")
-        .update(await readFile(path))
-        .digest("hex");
-      return { size: info.size, etag };
+      return { size: Number(info.size), etag: `${info.size}-${info.mtimeNs}` };
     } catch (err) {
       if (isNotFound(err)) return null;
       throw new StoreError(`stat ${key}`, err);

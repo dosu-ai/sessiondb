@@ -9,6 +9,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { getSession, getTrace, IngestRejected, listSessions, tombstone } from "./ingest/ingest";
 import {
+  OffsetMismatch,
   SessionRejected,
   type SessionUpload,
   type StoreSessionResult,
@@ -198,12 +199,19 @@ export function createApp(options: AppOptions) {
   // --- sessions ---------------------------------------------------------
 
   /** The pipeline (`ingest/session.ts`) as a response: 201 for a new trace, 200 for a duplicate
-   * or a trivial session, 422 for a transcript it refuses. */
+   * or a trivial session, 422 for a transcript it refuses, 409 for a chunk that does not start
+   * where the session's log ends (`expected` says where it does). */
   async function stored(upload: SessionUpload): Promise<Response> {
     let result: StoreSessionResult;
     try {
       result = await storeSession(upload, { store, client, now });
     } catch (err) {
+      if (err instanceof OffsetMismatch) {
+        return json(
+          { error: { code: err.code, message: err.message, expected: err.expected } },
+          409,
+        );
+      }
       if (err instanceof SessionRejected) throw new HttpError(422, err.code, err.message);
       if (err instanceof IngestRejected) throw new HttpError(422, err.code, err.message);
       throw err;
@@ -218,6 +226,10 @@ export function createApp(options: AppOptions) {
     const format = (str(body, "format") ?? "jsonl") as RawFormat;
     if (format !== "jsonl" && format !== "json") {
       throw new HttpError(400, "bad_field", "format must be jsonl or json");
+    }
+    const offset = body.offset ?? 0;
+    if (!Number.isInteger(offset) || (offset as number) < 0) {
+      throw new HttpError(400, "bad_field", "offset must be a byte offset ≥ 0");
     }
     const shipped = body.shipped as { records?: unknown; prefix_sha256?: unknown } | undefined;
     if (
@@ -235,6 +247,7 @@ export function createApp(options: AppOptions) {
       session_id: str(body, "session_id", true) as string,
       transcript: str(body, "transcript", true) as string,
       format,
+      offset: offset as number,
       project: str(body, "project"),
       branch: str(body, "branch"),
       parent_session_id: str(body, "parent_session_id"),

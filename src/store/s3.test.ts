@@ -51,6 +51,13 @@ describe.skipIf(!configured)("S3Store against a live endpoint", () => {
     expect(await s.stat("a/b.txt")).toEqual({ size: 5, etag: "5d41402abc4b2a76b9719d911017c592" });
     expect(await s.get("a/missing")).toBeNull();
     expect(await s.stat("a/missing")).toBeNull();
+    const text = async (start: number, end?: number) =>
+      new TextDecoder().decode((await s.get("a/b.txt", { range: { start, end } })) as Uint8Array);
+    expect(await text(1, 3)).toBe("el");
+    expect(await text(3)).toBe("lo");
+    expect(await text(3, 50)).toBe("lo");
+    expect(await text(5)).toBe("");
+    expect(await text(9)).toBe("");
     await s.put("a/c.txt", body);
     expect((await s.list("a/")).keys).toEqual(["a/b.txt", "a/c.txt"]);
     expect((await s.list("a/", { startAfter: "a/b.txt" })).keys).toEqual(["a/c.txt"]);

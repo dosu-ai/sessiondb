@@ -12,9 +12,6 @@ export interface ObjectStat {
 
 export interface PutOptions {
   contentType?: string;
-  /** Fail with `ObjectExistsError` if the key already exists (`If-None-Match: *`). Not every
-   * backend honours it atomically; `publish` re-reads to decide. */
-  ifNoneMatch?: boolean;
 }
 
 export interface ListOptions {
@@ -28,22 +25,21 @@ export interface ListResult {
   truncated: boolean;
 }
 
+export interface GetOptions {
+  /** Read only `[start, end)` of the object, as an HTTP `Range`. An `end` past the object reads
+   * to its end; a `start` at or past it reads nothing. */
+  range?: { start: number; end?: number };
+}
+
 export interface Store {
   /** `file:///…`, `s3://bucket/prefix`, `r2://bucket/prefix`. */
   readonly url: string;
-  get(key: string): Promise<Uint8Array | null>;
+  get(key: string, options?: GetOptions): Promise<Uint8Array | null>;
   put(key: string, body: Uint8Array, options?: PutOptions): Promise<void>;
   stat(key: string): Promise<ObjectStat | null>;
   delete(key: string): Promise<void>;
   /** Keys under `prefix`, in lexicographic order. */
   list(prefix: string, options?: ListOptions): Promise<ListResult>;
-}
-
-export class ObjectExistsError extends Error {
-  constructor(readonly key: string) {
-    super(`object exists: ${key}`);
-    this.name = "ObjectExistsError";
-  }
 }
 
 export class StoreError extends Error {

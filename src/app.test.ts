@@ -3,6 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type App, createApp } from "./app";
+import { prefixSha256 } from "./ingest/continuation";
+import { getTrace } from "./ingest/ingest";
+import { normalizeTranscript } from "./normalize";
 import { FsStore } from "./store/fs";
 import { archiveId, keys } from "./store/layout";
 import { gunzipJson, readMetadata } from "./store/publish";
@@ -308,6 +311,268 @@ describe("sessions", () => {
     expect(metadata?.raw).toHaveLength(1);
   });
 
+  describe("chunks", () => {
+    const token = TOKEN;
+    const line = (row: Record<string, unknown>) => `${JSON.stringify(row)}\n`;
+    const turn = (n: number, text: string) =>
+      line({
+        type: "user",
+        uuid: `u${n}`,
+        timestamp: `2026-09-01T00:${String(n).padStart(2, "0")}:00.000Z`,
+        sessionId: "sess1",
+        message: { role: "user", content: `question ${n}` },
+      }) +
+      line({
+        type: "assistant",
+        uuid: `a${n}`,
+        timestamp: `2026-09-01T00:${String(n).padStart(2, "0")}:05.000Z`,
+        sessionId: "sess1",
+        message: { role: "assistant", model: "claude-x", content: [{ type: "text", text }] },
+      });
+    /** A progress row the adapter drops: a chunk of it alone has no records. */
+    const noise = line({ type: "progress", uuid: "p1", sessionId: "sess1", data: {} });
+    const bytes = (s: string) => Buffer.byteLength(s);
+
+    type Answer = {
+      status: string;
+      records?: number;
+      records_total: number;
+      prefix_sha256: string;
+      bytes_total: number;
+      raw: { part: number };
+    };
+    const post = async (body: Record<string, unknown>) => {
+      const res = await call("POST", "/v1/sessions", {
+        token,
+        body: { agent: "claude-code", session_id: "chunked", ...body },
+      });
+      return [res.status, (await res.json()) as Answer] as const;
+    };
+
+    it("takes a log in chunks, each a continuation of the last, and the chunks stitch to the whole", async () => {
+      const chunk2 = turn(10, `Second. ${"More. ".repeat(100)}`);
+      const chunk3 = noise + turn(11, `Third. ${"Yet more. ".repeat(100)}`);
+      const whole = CLAUDE + chunk2 + chunk3;
+
+      const [s1, first] = await post({ transcript: CLAUDE });
+      expect(s1).toBe(201);
+      expect(first.bytes_total).toBe(bytes(CLAUDE));
+
+      const [s2, second] = await post({ transcript: chunk2, offset: first.bytes_total });
+      expect(s2).toBe(201);
+      expect(second).toMatchObject({
+        status: "stored",
+        // Meta plus the chunk's two records went.
+        records: 3,
+        records_total: first.records_total + 2,
+        bytes_total: bytes(CLAUDE) + bytes(chunk2),
+        raw: { part: 1 },
+      });
+
+      const [s3, third] = await post({ transcript: chunk3, offset: second.bytes_total });
+      expect(s3).toBe(201);
+      expect(third.records_total).toBe(second.records_total + 2);
+      expect(third.bytes_total).toBe(bytes(whole));
+
+      // Every chunk is its own raw part; the traces are the head and two continuations.
+      const archive = archiveId("acme", "claude-code", "chunked");
+      const metadata = await readMetadata(store, "acme", archive);
+      expect(metadata?.raw).toMatchObject([
+        { part: 0, offset: 0, length: bytes(CLAUDE) },
+        { part: 1, offset: bytes(CLAUDE), length: bytes(chunk2) },
+        { part: 2, offset: bytes(CLAUDE) + bytes(chunk2), length: bytes(chunk3) },
+      ]);
+      expect(metadata?.normalized).toMatchObject({
+        bytes: bytes(whole),
+        records: third.records_total,
+        prefix_sha256: third.prefix_sha256,
+      });
+      expect(metadata?.traces.map((t) => t.continuation?.from_record)).toEqual([
+        undefined,
+        first.records_total,
+        second.records_total,
+      ]);
+
+      // Stitched, the traces hold exactly what the whole log normalizes to, and the answer's
+      // prefix hash is the whole's.
+      const stitched = [];
+      for (const ref of metadata?.traces ?? []) {
+        const trace = await getTrace(store, "acme", archive, ref.content_hash);
+        stitched.push(...(trace?.records ?? []).slice(ref.continuation ? 1 : 0));
+      }
+      const expected = normalizeTranscript({ source: "claude-code", transcript: whole }).records;
+      expect(stitched).toEqual(expected);
+      expect(third.prefix_sha256).toBe(prefixSha256(expected, expected.length));
+
+      // So a client can go back to whole uploads with `shipped` and still be continued.
+      const chunk4 = turn(12, `Fourth. ${"And more. ".repeat(300)}`);
+      const [s4, fourth] = await post({
+        transcript: whole + chunk4,
+        shipped: { records: third.records_total, prefix_sha256: third.prefix_sha256 },
+      });
+      expect(s4).toBe(201);
+      expect(fourth).toMatchObject({ records: 3, records_total: third.records_total + 2 });
+      const after = await readMetadata(store, "acme", archive);
+      expect(after?.traces.at(-1)?.continuation).toEqual({
+        from_record: third.records_total,
+        prefix_sha256: third.prefix_sha256,
+      });
+      // A whole upload replaces the parts: one part again, and the chunk state is the whole's.
+      expect(after?.raw).toMatchObject([{ part: 0, offset: 0, length: bytes(whole + chunk4) }]);
+      expect(after?.normalized?.bytes).toBe(bytes(whole + chunk4));
+    });
+
+    it("moves the log on past a chunk with nothing in it, shipping nothing", async () => {
+      const [, first] = await post({ transcript: CLAUDE });
+      const [status, answer] = await post({ transcript: noise, offset: first.bytes_total });
+      expect(status).toBe(200);
+      expect(answer).toMatchObject({
+        status: "trivial",
+        records_total: first.records_total,
+        prefix_sha256: first.prefix_sha256,
+        bytes_total: bytes(CLAUDE) + bytes(noise),
+      });
+      const [s2, second] = await post({
+        transcript: turn(10, `Second. ${"More. ".repeat(100)}`),
+        offset: answer.bytes_total,
+      });
+      expect(s2).toBe(201);
+      expect(second.records_total).toBe(first.records_total + 2);
+    });
+
+    /** The agent working: a tool call and its result, no user turn. What most chunks of a
+     * running session are. */
+    const toolTurn = (n: number, command: string, output: string) =>
+      line({
+        type: "assistant",
+        uuid: `a${n}`,
+        timestamp: `2026-09-01T00:${String(n).padStart(2, "0")}:05.000Z`,
+        sessionId: "sess1",
+        message: {
+          role: "assistant",
+          model: "claude-x",
+          content: [{ type: "tool_use", id: `toolu_${n}`, name: "Bash", input: { command } }],
+        },
+      }) +
+      line({
+        type: "user",
+        uuid: `t${n}`,
+        timestamp: `2026-09-01T00:${String(n).padStart(2, "0")}:06.000Z`,
+        sessionId: "sess1",
+        message: {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: `toolu_${n}`, content: output }],
+        },
+      });
+
+    it("ships a chunk that is all tool traffic: a tail is not judged as a conversation", async () => {
+      const [, first] = await post({ transcript: CLAUDE });
+      const [status, answer] = await post({
+        transcript: toolTurn(10, "git status", "clean"),
+        offset: first.bytes_total,
+      });
+      expect(status).toBe(201);
+      expect(answer).toMatchObject({ status: "stored", records: 3 });
+    });
+
+    it("keeps two chunks that say the same thing apart: they are two places in the session", async () => {
+      // The same exchange twice (the user asks again, the agent answers the same); only the
+      // ids and timestamps differ, and those are outside the hash.
+      const again = (n: number) =>
+        line({
+          type: "user",
+          uuid: `u${n}`,
+          timestamp: `2026-09-01T00:${String(n).padStart(2, "0")}:00.000Z`,
+          sessionId: "sess1",
+          message: { role: "user", content: "again?" },
+        }) + toolTurn(n, "ls", `a.ts ${"b.ts ".repeat(500)}`);
+      const [, first] = await post({ transcript: CLAUDE });
+      const [s2, second] = await post({ transcript: again(10), offset: first.bytes_total });
+      const [s3, third] = await post({ transcript: again(11), offset: second.bytes_total });
+      expect([s2, s3]).toEqual([201, 201]);
+      expect(third.status).toBe("stored");
+      const archive = archiveId("acme", "claude-code", "chunked");
+      const metadata = await readMetadata(store, "acme", archive);
+      expect(metadata?.traces).toHaveLength(3);
+      expect(metadata?.traces.map((t) => t.continuation?.from_record)).toEqual([
+        undefined,
+        first.records_total,
+        second.records_total,
+      ]);
+      // Sent again from the same place (a whole upload with `shipped`), the same tail is the
+      // same trace.
+      const [s4, fourth] = await post({
+        transcript: CLAUDE + again(10) + again(11),
+        shipped: { records: second.records_total, prefix_sha256: second.prefix_sha256 },
+      });
+      expect(s4).toBe(200);
+      expect(fourth.status).toBe("duplicate");
+      expect((await readMetadata(store, "acme", archive))?.traces).toHaveLength(3);
+    });
+
+    it("holds chunks until the session is worth a trace, then normalizes them together", async () => {
+      // The greeting-sized log is trivial; so is its first chunk.
+      const [s1, first] = await post({ transcript: SMALL });
+      expect(s1).toBe(200);
+      expect(first.status).toBe("trivial");
+      const chunk2 = turn(10, "Short.");
+      const [s2, second] = await post({ transcript: chunk2, offset: first.bytes_total });
+      expect(s2).toBe(200);
+      expect(second.status).toBe("trivial");
+      // A substantial answer: the three chunks are now one session, with one trace.
+      const chunk3 = turn(11, `Long. ${"Detail. ".repeat(300)}`);
+      const [s3, third] = await post({ transcript: chunk3, offset: second.bytes_total });
+      expect(s3).toBe(201);
+      const archive = archiveId("acme", "claude-code", "chunked");
+      const metadata = await readMetadata(store, "acme", archive);
+      expect(metadata?.raw).toHaveLength(3);
+      expect(metadata?.traces).toHaveLength(1);
+      expect(metadata?.traces[0].continuation).toBeUndefined();
+      const whole = normalizeTranscript({
+        source: "claude-code",
+        transcript: SMALL + chunk2 + chunk3,
+      }).records;
+      expect(third.records_total).toBe(whole.length);
+      const trace = await getTrace(store, "acme", archive, metadata?.head ?? "");
+      expect(trace?.records).toEqual(whole);
+    });
+
+    it("refuses a chunk that does not start where the log ends, saying where it does", async () => {
+      // No session yet: the client sends the whole log.
+      let [status, body] = await post({ transcript: turn(1, "x"), offset: 100 });
+      expect(status).toBe(409);
+      expect(body).toMatchObject({ error: { code: "offset_mismatch", expected: 0 } });
+
+      const [, first] = await post({ transcript: CLAUDE });
+      [status, body] = await post({ transcript: turn(2, "x"), offset: first.bytes_total + 1 });
+      expect(status).toBe(409);
+      expect(body).toMatchObject({ error: { expected: first.bytes_total } });
+      // Nothing was stored for it.
+      const metadata = await readMetadata(
+        store,
+        "acme",
+        archiveId("acme", "claude-code", "chunked"),
+      );
+      expect(metadata?.raw).toHaveLength(1);
+
+      // A chunk must be whole lines of a jsonl log.
+      [status, body] = await post({ transcript: '{"type":"user"', offset: first.bytes_total });
+      expect(status).toBe(422);
+      expect(body).toMatchObject({ error: { code: "bad_chunk" } });
+      [status, body] = await post({
+        transcript: "{}\n",
+        offset: first.bytes_total,
+        format: "json",
+      });
+      expect(status).toBe(422);
+      expect(body).toMatchObject({ error: { code: "bad_chunk" } });
+      [status, body] = await post({ transcript: "{}\n", offset: -1 });
+      expect(status).toBe(400);
+      [status, body] = await post({ transcript: "{}\n", offset: "later" });
+      expect(status).toBe(400);
+    });
+  });
+
   it("rejects what cannot be stored with 422 and a code", async () => {
     const token = TOKEN;
     const code = async (body: unknown) =>
@@ -419,10 +684,15 @@ describe("sessions", () => {
       status: "trivial",
       records_total: expect.any(Number),
       prefix_sha256: expect.any(String),
+      bytes_total: Buffer.byteLength(SMALL),
       raw: { status: "stored", part: 0 },
     });
     const metadata = await readMetadata(store, "acme", archiveId("acme", "claude-code", "tiny"));
-    expect(metadata).toMatchObject({ status: "stored", traces: [], raw: [{ part: 0 }] });
+    expect(metadata).toMatchObject({
+      status: "stored",
+      traces: [],
+      raw: [{ part: 0, offset: 0, length: Buffer.byteLength(SMALL) }],
+    });
     expect(metadata?.head).toBeUndefined();
     expect(await (await call("GET", "/v1/changes", { token })).json()).toMatchObject({
       entries: [],

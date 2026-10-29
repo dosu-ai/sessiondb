@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FsStore } from "./fs";
 import { archiveId, changeStamp, keys } from "./layout";
 import { probe, publishObject } from "./publish";
-import { ObjectExistsError, StoreError } from "./store";
+import { StoreError } from "./store";
 
 let dir: string;
 let store: FsStore;
@@ -18,15 +18,27 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 describe("FsStore", () => {
-  it("round-trips objects and reports an MD5 etag", async () => {
+  it("round-trips objects and reports an etag that changes with the content", async () => {
     await store.put("a/b/c.txt", enc("hello"));
     expect(new TextDecoder().decode((await store.get("a/b/c.txt")) as Uint8Array)).toBe("hello");
-    expect(await store.stat("a/b/c.txt")).toEqual({
-      size: 5,
-      etag: "5d41402abc4b2a76b9719d911017c592",
-    });
+    const first = await store.stat("a/b/c.txt");
+    expect(first).toMatchObject({ size: 5, etag: expect.stringMatching(/^5-\d+$/) });
+    await store.put("a/b/c.txt", enc("hello!"));
+    expect((await store.stat("a/b/c.txt"))?.etag).not.toBe(first?.etag);
     expect(await store.get("a/b/missing")).toBeNull();
     expect(await store.stat("a/b/missing")).toBeNull();
+  });
+
+  it("reads a byte range, clipped to the object", async () => {
+    await store.put("r.txt", enc("0123456789"));
+    const text = async (start: number, end?: number) =>
+      new TextDecoder().decode((await store.get("r.txt", { range: { start, end } })) as Uint8Array);
+    expect(await text(0, 4)).toBe("0123");
+    expect(await text(4)).toBe("456789");
+    expect(await text(8, 100)).toBe("89");
+    expect(await text(10)).toBe("");
+    expect(await text(50)).toBe("");
+    expect(await store.get("missing", { range: { start: 0 } })).toBeNull();
   });
 
   it("accepts a file:// URL and refuses keys that escape the root", async () => {
@@ -35,13 +47,6 @@ describe("FsStore", () => {
     expect(viaUrl.url.startsWith("file://")).toBe(true);
     await expect(store.put("../x", enc("x"))).rejects.toBeInstanceOf(StoreError);
     await expect(store.get("/abs")).rejects.toBeInstanceOf(StoreError);
-  });
-
-  it("honours ifNoneMatch", async () => {
-    await store.put("k", enc("1"), { ifNoneMatch: true });
-    await expect(store.put("k", enc("2"), { ifNoneMatch: true })).rejects.toBeInstanceOf(
-      ObjectExistsError,
-    );
   });
 
   it("lists in key order with startAfter and limit, ignoring temp files", async () => {

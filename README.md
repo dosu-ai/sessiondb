@@ -13,7 +13,7 @@ store, or a folder, under a documented layout that anything can read.
 
 ```
 client ──POST /v1/sessions (raw transcript, bearer token)──▶ sessiondb
-                                                               normalize · redact · ingest
+                                                               store raw · normalize · trace
                                                                     │
                                                                     ▼
                                                    your bucket (s3:// r2:// file://)
@@ -58,12 +58,24 @@ curl -sS http://localhost:7200/v1/sessions \
 
 ```json
 { "status": "stored", "archive_id": "…", "content_hash": "…", "session_id": "8f1c…",
-  "records": 41, "events": 38, "records_total": 41, "prefix_sha256": "…",
+  "records": 41, "events": 38, "records_total": 41, "prefix_sha256": "…", "bytes_total": 48213,
   "raw": { "status": "stored", "part": 0 } }
 ```
 
-The full API, every environment variable, and the rules for continuations and forks are in
-[`docs/server.md`](docs/server.md).
+As the session goes on, send only what the log gained since, as a chunk from `bytes_total`:
+
+```sh
+tail -c +48214 ~/.claude/projects/-repo-app/8f1c….jsonl |
+jq -Rs '{agent: "claude-code", session_id: "8f1c…", transcript: ., offset: 48213}' |
+curl -sS http://localhost:7200/v1/sessions \
+  -H "Authorization: Bearer $SESSIONDB_TOKEN" -H "Content-Type: application/json" --data-binary @-
+```
+
+The chunk is normalized on its own and stored as a continuation of the session's trace; the
+server keeps where the log stands, so a large session costs each time only what was appended.
+
+The full API, every environment variable, and the rules for chunks, continuations and forks
+are in [`docs/server.md`](docs/server.md).
 
 ### Storage already in Datadog Trajectory's format
 
@@ -71,8 +83,8 @@ The full API, every environment variable, and the rules for continuations and fo
 in a format of its own, one file per session under `~/.trajectory/trajectories/sessions/`.
 sessiondb reads that format. Put those files in the bucket under the person's folder and
 there is nothing to post: the server scans each owner's folder on an interval, normalizes every
-Trajectory session file it finds there to Letta trajectory-v1 like any other transcript, and
-leaves the files where they are.
+Trajectory session file it finds there to Letta trajectory-v1 like any other transcript, reads
+only what each file gained since the last scan, and leaves the files where they are.
 
 ```sh
 aws s3 sync ~/.trajectory s3://bucket/prefix/owners/alice/.trajectory
