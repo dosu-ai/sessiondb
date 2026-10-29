@@ -43,6 +43,17 @@ session.
 Put TLS in front of it (a reverse proxy, Cloud Run, a load balancer): transcripts arrive
 unredacted and the server is where that stops being true.
 
+### Deploying
+
+Every release is published as a container image, `ghcr.io/dosu-ai/sessiondb:<version>`, built
+from the `Dockerfile` in this repository. It listens on `PORT` (default `7200`), reports
+`/healthz` for liveness, and needs only the environment variables above: there is no database,
+no volume (unless the store is `file://`), and no state outside the bucket, so any platform that
+runs a container works. Keep the request timeout at 120 seconds or more; a large transcript can
+take that long to normalize and verify. Platforms that cap request bodies (Cloud Run's HTTP/1
+limit is 32 MiB) are fine as long as clients send `Content-Encoding: gzip`, which every route
+accepts.
+
 ### Who sees what
 
 A token is bound to one name and the server scopes every call to `owners/<name>/`: the
