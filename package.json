@@ -1,0 +1,32 @@
+{
+  "name": "sessiondb",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The sessiondb server: coding-agent sessions as a durable, redacted, content-addressed store. Clients upload raw transcripts with a token; the server normalizes, redacts and writes them to the owner's S3 / R2 bucket.",
+  "license": "MIT",
+  "repository": "github:dosu-ai/sessiondb",
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/main.ts",
+    "dev": "bun --watch run src/main.ts",
+    "test": "bun --bun vitest run",
+    "test:watch": "bun --bun vitest",
+    "typecheck": "bunx tsc --noEmit",
+    "lint": "bunx biome lint .",
+    "format": "bunx biome format --write .",
+    "check": "bunx biome check .",
+    "goldens": "bun run scripts/goldens.ts"
+  },
+  "dependencies": {
+    "@letta-ai/trajectory": "^0.3.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.0",
+    "@types/bun": "1.4.2",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
+  },
+  "engines": {
+    "bun": ">=1.3"
+  }
+}

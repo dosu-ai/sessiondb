@@ -1,0 +1,18 @@
+[
+  {
+    "role": "meta",
+    "source": "claude-code",
+    "cwd": "/repo/app",
+    "git_branch": "main",
+    "model": "claude-x"
+  },
+  {
+    "role": "user",
+    "content": "x"
+  },
+  {
+    "role": "assistant",
+    "content": "y",
+    "timestamp": "2026-09-01T00:00:02.000Z"
+  }
+]

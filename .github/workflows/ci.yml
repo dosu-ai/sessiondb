@@ -1,0 +1,54 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      s3:
+        image: rustfs/rustfs:latest
+        ports: ["9000:9000"]
+        env:
+          RUSTFS_ACCESS_KEY: rustfsadmin
+          RUSTFS_SECRET_KEY: rustfsadmin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+      - run: bun run typecheck
+      - run: bun run test
+      - name: Create the S3 test bucket
+        run: |
+          pip install --quiet awscli
+          AWS_ACCESS_KEY_ID=rustfsadmin AWS_SECRET_ACCESS_KEY=rustfsadmin AWS_DEFAULT_REGION=us-east-1 \
+            aws --endpoint-url http://127.0.0.1:9000 s3 mb s3://sessiondb-test
+      - name: S3 store test against a live endpoint
+        env:
+          SESSIONDB_TEST_S3_ENDPOINT: http://127.0.0.1:9000
+          SESSIONDB_TEST_S3_BUCKET: sessiondb-test
+          SESSIONDB_TEST_S3_ACCESS_KEY: rustfsadmin
+          SESSIONDB_TEST_S3_SECRET_KEY: rustfsadmin
+        run: bun --bun vitest run src/store/s3.test.ts
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t sessiondb .
+      - name: Boot against a file store and hit /healthz
+        run: |
+          docker run -d --name sessiondb -p 7200:7200 \
+            -e SESSIONDB_TOKEN=ci-token-0123456789abcdef -e SESSIONDB_STORE_URL=file:///data sessiondb
+          for i in $(seq 1 20); do
+            curl -fsS http://127.0.0.1:7200/healthz && exit 0
+            sleep 1
+          done
+          docker logs sessiondb
+          exit 1

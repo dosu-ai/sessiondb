@@ -1,0 +1,22 @@
+{
+  "rejected": false,
+  "content_hash": "0313659d1486951eb864b8732072e83cb5b7dd3127d74d1a9825fb7c1203b078",
+  "source": "codex",
+  "started_at": "2026-09-01T00:00:01.000Z",
+  "ended_at": "2026-09-01T00:00:02.000Z",
+  "metadata": {},
+  "events": [
+    {
+      "index": 0,
+      "role": "user",
+      "text": "日本語のテスト 🚀 café é 𝔘𝔫𝔦𝔠𝔬𝔡𝔢",
+      "timestamp": "2026-09-01T00:00:01.000Z"
+    },
+    {
+      "index": 1,
+      "role": "assistant",
+      "text": "Ünïcödé ✓ — “quotes” …",
+      "timestamp": "2026-09-01T00:00:02.000Z"
+    }
+  ]
+}

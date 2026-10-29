@@ -1,0 +1,42 @@
+[
+  {
+    "role": "meta",
+    "source": "opencode",
+    "cwd": "/repo/app",
+    "model": "claude-haiku-4-5"
+  },
+  {
+    "role": "user",
+    "content": "How does auth work? password: \"[redacted:credential]\"",
+    "timestamp": "2026-10-02T17:58:52.445Z"
+  },
+  {
+    "role": "assistant",
+    "content": "Reading the auth module first.",
+    "timestamp": "2026-10-02T17:58:54.596Z"
+  },
+  {
+    "role": "assistant",
+    "content": null,
+    "tool_calls": [
+      {
+        "id": "toolu_0156L5aHDegRahdNMdG7zTv9",
+        "name": "read",
+        "args": "{\"filePath\":\"/repo/app/auth.ts\"}"
+      }
+    ],
+    "timestamp": "2026-10-02T17:58:55.000Z"
+  },
+  {
+    "role": "tool",
+    "tool_call_id": "toolu_0156L5aHDegRahdNMdG7zTv9",
+    "content": "export const KEY = 1;",
+    "ok": true,
+    "timestamp": "2026-10-02T17:58:55.100Z"
+  },
+  {
+    "role": "assistant",
+    "content": "Auth reads KEY; the token is [redacted:github-token] here.",
+    "timestamp": "2026-10-02T17:58:57.000Z"
+  }
+]

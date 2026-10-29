@@ -1,0 +1,42 @@
+{
+  "rejected": false,
+  "content_hash": "02c00844e3840c6ba88c3e000805f52881ec34a7db8156e1d55ead27a302d8af",
+  "source": "claude-code",
+  "started_at": "2026-09-01T00:00:00.000Z",
+  "ended_at": "2026-09-01T00:00:07.000Z",
+  "metadata": {
+    "cwd": "/repo/app",
+    "git_branch": "main",
+    "model": "claude-x"
+  },
+  "events": [
+    {
+      "index": 0,
+      "role": "user",
+      "text": "How does auth work? password: \"[redacted:credential]\"",
+      "timestamp": "2026-09-01T00:00:00.000Z"
+    },
+    {
+      "index": 1,
+      "role": "assistant",
+      "text": "Token is [redacted:github-token] here.",
+      "timestamp": "2026-09-01T00:00:05.000Z"
+    },
+    {
+      "index": 2,
+      "role": "tool_call",
+      "text": "Read {\"file_path\":\"/repo/app/auth.ts\"}",
+      "timestamp": "2026-09-01T00:00:06.000Z",
+      "tool_name": "Read",
+      "tool_call_id": "toolu_01AbCdEfGhJkLmNpQr"
+    },
+    {
+      "index": 3,
+      "role": "tool_result",
+      "text": "export const KEY = 1;\n",
+      "timestamp": "2026-09-01T00:00:07.000Z",
+      "tool_call_id": "toolu_01AbCdEfGhJkLmNpQr",
+      "tool_name": "Read"
+    }
+  ]
+}

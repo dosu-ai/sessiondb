@@ -1,0 +1,82 @@
+[
+  {
+    "role": "meta",
+    "source": "claude-code",
+    "cwd": "/repo/app",
+    "git_branch": "main",
+    "model": "claude-x"
+  },
+  {
+    "role": "user",
+    "content": "go",
+    "timestamp": "2026-09-01T00:00:01.000Z"
+  },
+  {
+    "role": "assistant",
+    "content": null,
+    "timestamp": "2026-09-01T00:00:02.000Z"
+  },
+  {
+    "role": "assistant",
+    "content": "answer after empty calls",
+    "tool_calls": [],
+    "timestamp": "2026-09-01T00:00:03.000Z"
+  },
+  {
+    "role": "assistant",
+    "content": "",
+    "timestamp": "2026-09-01T00:00:04.000Z"
+  },
+  {
+    "role": "assistant",
+    "content": null,
+    "tool_calls": [
+      {
+        "id": "c1",
+        "name": "Bash",
+        "args": "{\"command\":\"ls -la\"}"
+      },
+      {
+        "id": "c2",
+        "name": "Read",
+        "args": "{\"file_path\":\"/a/b.ts\"}  "
+      }
+    ],
+    "timestamp": "2026-09-01T00:00:05.000Z"
+  },
+  {
+    "role": "tool",
+    "tool_call_id": "c2",
+    "content": "second first",
+    "ok": true,
+    "timestamp": "2026-09-01T00:00:06.000Z"
+  },
+  {
+    "role": "tool",
+    "tool_call_id": "c1",
+    "content": "total 0",
+    "ok": false,
+    "timestamp": "2026-09-01T00:00:07.000Z"
+  },
+  {
+    "role": "tool",
+    "tool_call_id": "unknown",
+    "content": "orphan",
+    "timestamp": "2026-09-01T00:00:08.000Z"
+  },
+  {
+    "role": "system",
+    "content": "sys",
+    "timestamp": "2026-09-01T00:00:09.000Z"
+  },
+  {
+    "role": "observation",
+    "content": "obs",
+    "timestamp": "2026-09-01T00:00:10.000Z"
+  },
+  {
+    "role": "reasoning",
+    "content": "hmm",
+    "timestamp": "2026-09-01T00:00:11.000Z"
+  }
+]

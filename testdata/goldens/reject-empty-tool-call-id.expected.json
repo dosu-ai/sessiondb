@@ -1,0 +1,4 @@
+{
+  "rejected": true,
+  "error": "record 2: tool_calls[0].id must not be empty"
+}

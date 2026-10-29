@@ -1,0 +1,27 @@
+[
+  {
+    "role": "meta",
+    "source": "codex",
+    "cwd": "/repo/app"
+  },
+  {
+    "role": "user",
+    "content": "Spawn a subagent to write the tests",
+    "timestamp": "2026-10-02T10:00:00.000Z"
+  },
+  {
+    "role": "assistant",
+    "content": "Spawned one.",
+    "timestamp": "2026-10-02T10:00:00.000Z"
+  },
+  {
+    "role": "observation",
+    "content": "<subagent_notification>\n{\"agent_path\":\"01a0ff74-c903\",\"status\":{\"completed\":\"Wrote test_calc.py\"}}",
+    "timestamp": "2026-10-02T10:00:00.000Z"
+  },
+  {
+    "role": "assistant",
+    "content": "The subagent wrote the tests.",
+    "timestamp": "2026-10-02T10:00:00.000Z"
+  }
+]

@@ -1,0 +1,85 @@
+{
+  "rejected": false,
+  "content_hash": "91f3cf195becd14ccaeaa4a2af2dc93005b0d99fc3a6ea981ffc4959ddf0de8a",
+  "source": "claude-code",
+  "started_at": "2026-09-01T00:00:01.000Z",
+  "ended_at": "2026-09-01T00:00:11.000Z",
+  "metadata": {
+    "cwd": "/repo/app",
+    "git_branch": "main",
+    "model": "claude-x"
+  },
+  "events": [
+    {
+      "index": 0,
+      "role": "user",
+      "text": "go",
+      "timestamp": "2026-09-01T00:00:01.000Z"
+    },
+    {
+      "index": 1,
+      "role": "assistant",
+      "text": "answer after empty calls",
+      "timestamp": "2026-09-01T00:00:03.000Z"
+    },
+    {
+      "index": 2,
+      "role": "tool_call",
+      "text": "Bash {\"command\":\"ls -la\"}",
+      "timestamp": "2026-09-01T00:00:05.000Z",
+      "tool_name": "Bash",
+      "tool_call_id": "c1"
+    },
+    {
+      "index": 3,
+      "role": "tool_call",
+      "text": "Read {\"file_path\":\"/a/b.ts\"}",
+      "timestamp": "2026-09-01T00:00:05.000Z",
+      "tool_name": "Read",
+      "tool_call_id": "c2"
+    },
+    {
+      "index": 4,
+      "role": "tool_result",
+      "text": "second first",
+      "timestamp": "2026-09-01T00:00:06.000Z",
+      "tool_call_id": "c2",
+      "tool_name": "Read",
+      "ok": true
+    },
+    {
+      "index": 5,
+      "role": "tool_result",
+      "text": "total 0",
+      "timestamp": "2026-09-01T00:00:07.000Z",
+      "tool_call_id": "c1",
+      "tool_name": "Bash",
+      "ok": false
+    },
+    {
+      "index": 6,
+      "role": "tool_result",
+      "text": "orphan",
+      "timestamp": "2026-09-01T00:00:08.000Z",
+      "tool_call_id": "unknown"
+    },
+    {
+      "index": 7,
+      "role": "system",
+      "text": "sys",
+      "timestamp": "2026-09-01T00:00:09.000Z"
+    },
+    {
+      "index": 8,
+      "role": "observation",
+      "text": "obs",
+      "timestamp": "2026-09-01T00:00:10.000Z"
+    },
+    {
+      "index": 9,
+      "role": "reasoning",
+      "text": "hmm",
+      "timestamp": "2026-09-01T00:00:11.000Z"
+    }
+  ]
+}

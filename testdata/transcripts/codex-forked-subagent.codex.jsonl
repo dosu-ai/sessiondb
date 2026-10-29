@@ -1,0 +1,6 @@
+{"timestamp":"2026-10-02T10:00:00.000Z","ordinal":0,"type":"session_meta","payload":{"id":"01a0ff74-c903-73c2-b6b1-7546b84710ff","timestamp":"2026-10-02T10:00:00.000Z","cwd":"/repo/app","forked_from_id":"01a0ff74-a68d-7ad0-83ee-80cf02c29b14","parent_thread_id":"01a0ff74-a68d-7ad0-83ee-80cf02c29b14","thread_source":"subagent","subagent_history_start_ordinal":4}}
+{"timestamp":"2026-10-02T10:00:00.000Z","ordinal":1,"type":"session_meta","payload":{"id":"01a0ff74-a68d-7ad0-83ee-80cf02c29b14","timestamp":"2026-10-02T10:00:00.000Z","cwd":"/repo/app","thread_source":"user"}}
+{"timestamp":"2026-10-02T10:00:00.000Z","ordinal":2,"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Spawn a subagent to write the tests"}]}}
+{"timestamp":"2026-10-02T10:00:00.000Z","ordinal":3,"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Spawning one."}]}}
+{"timestamp":"2026-10-02T10:00:00.000Z","ordinal":4,"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Write test_calc.py for calc.py"}]}}
+{"timestamp":"2026-10-02T10:00:00.000Z","ordinal":5,"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Wrote test_calc.py."}]}}

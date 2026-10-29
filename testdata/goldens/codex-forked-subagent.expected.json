@@ -1,0 +1,24 @@
+{
+  "rejected": false,
+  "content_hash": "8197ce01099c1560850162a0b523fec63cf68180c40a7d203214065b0091182e",
+  "source": "codex",
+  "started_at": "2026-10-02T10:00:00.000Z",
+  "ended_at": "2026-10-02T10:00:00.000Z",
+  "metadata": {
+    "cwd": "/repo/app"
+  },
+  "events": [
+    {
+      "index": 0,
+      "role": "user",
+      "text": "Write test_calc.py for calc.py",
+      "timestamp": "2026-10-02T10:00:00.000Z"
+    },
+    {
+      "index": 1,
+      "role": "assistant",
+      "text": "Wrote test_calc.py.",
+      "timestamp": "2026-10-02T10:00:00.000Z"
+    }
+  ]
+}

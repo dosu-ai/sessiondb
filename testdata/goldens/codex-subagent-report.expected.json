@@ -1,0 +1,36 @@
+{
+  "rejected": false,
+  "content_hash": "80a664747edbee78a7ccdd132225928344675d080e88e8a914ed89780e564595",
+  "source": "codex",
+  "started_at": "2026-10-02T10:00:00.000Z",
+  "ended_at": "2026-10-02T10:00:00.000Z",
+  "metadata": {
+    "cwd": "/repo/app"
+  },
+  "events": [
+    {
+      "index": 0,
+      "role": "user",
+      "text": "Spawn a subagent to write the tests",
+      "timestamp": "2026-10-02T10:00:00.000Z"
+    },
+    {
+      "index": 1,
+      "role": "assistant",
+      "text": "Spawned one.",
+      "timestamp": "2026-10-02T10:00:00.000Z"
+    },
+    {
+      "index": 2,
+      "role": "observation",
+      "text": "<subagent_notification>\n{\"agent_path\":\"01a0ff74-c903\",\"status\":{\"completed\":\"Wrote test_calc.py\"}}",
+      "timestamp": "2026-10-02T10:00:00.000Z"
+    },
+    {
+      "index": 3,
+      "role": "assistant",
+      "text": "The subagent wrote the tests.",
+      "timestamp": "2026-10-02T10:00:00.000Z"
+    }
+  ]
+}

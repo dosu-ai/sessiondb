@@ -1,0 +1,4 @@
+{"type":"user","uuid":"u1","timestamp":"2026-09-01T00:00:00.000Z","cwd":"/repo/app","gitBranch":"main","sessionId":"sess1","message":{"role":"user","content":"How does auth work? password: \"hunter2secretvalue42\""}}
+{"type":"assistant","uuid":"a1","timestamp":"2026-09-01T00:00:05.000Z","sessionId":"sess1","message":{"role":"assistant","model":"claude-x","content":[{"type":"text","text":"Token is ghp_abcdefghijklmnopqrstuvwxyz012345 here."}]}}
+{"type":"assistant","uuid":"a2","timestamp":"2026-09-01T00:00:06.000Z","sessionId":"sess1","message":{"role":"assistant","model":"claude-x","content":[{"type":"tool_use","id":"toolu_01AbCdEfGhJkLmNpQr","name":"Read","input":{"file_path":"/repo/app/auth.ts"}}]}}
+{"type":"user","uuid":"u2","timestamp":"2026-09-01T00:00:07.000Z","sessionId":"sess1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01AbCdEfGhJkLmNpQr","content":"export const KEY = 1;  \r\n"}]}}

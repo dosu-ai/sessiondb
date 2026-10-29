@@ -1,0 +1,37 @@
+[
+  {
+    "role": "meta",
+    "source": "claude-code",
+    "cwd": "/repo/app",
+    "git_branch": "main",
+    "model": "claude-x"
+  },
+  {
+    "role": "user",
+    "content": "How does auth work? password: \"[redacted:credential]\"",
+    "timestamp": "2026-09-01T00:00:00.000Z"
+  },
+  {
+    "role": "assistant",
+    "content": "Token is [redacted:github-token] here.",
+    "timestamp": "2026-09-01T00:00:05.000Z"
+  },
+  {
+    "role": "assistant",
+    "content": null,
+    "tool_calls": [
+      {
+        "id": "toolu_01AbCdEfGhJkLmNpQr",
+        "name": "Read",
+        "args": "{\"file_path\":\"/repo/app/auth.ts\"}"
+      }
+    ],
+    "timestamp": "2026-09-01T00:00:06.000Z"
+  },
+  {
+    "role": "tool",
+    "tool_call_id": "toolu_01AbCdEfGhJkLmNpQr",
+    "content": "export const KEY = 1;  \r\n",
+    "timestamp": "2026-09-01T00:00:07.000Z"
+  }
+]

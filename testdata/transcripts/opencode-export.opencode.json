@@ -1,0 +1,117 @@
+{
+  "info": {
+    "id": "ses_0ff3fixture00001",
+    "slug": "calm-eagle",
+    "projectID": "15d496110225279d",
+    "directory": "/repo/app",
+    "path": "",
+    "title": "Auth walkthrough",
+    "version": "1.18.34",
+    "time": {
+      "created": 1790963932400,
+      "updated": 1790963941200
+    }
+  },
+  "messages": [
+    {
+      "info": {
+        "role": "user",
+        "time": {
+          "created": 1790963932445
+        },
+        "agent": "build",
+        "id": "msg_ses_0ff3fixture00001_1",
+        "sessionID": "ses_0ff3fixture00001"
+      },
+      "parts": [
+        {
+          "type": "text",
+          "text": "How does auth work? password: \"hunter2secretvalue42\"",
+          "id": "prt_ses_0ff3fixture00001_1",
+          "messageID": "msg_ses_0ff3fixture00001_1",
+          "sessionID": "ses_0ff3fixture00001"
+        }
+      ]
+    },
+    {
+      "info": {
+        "role": "assistant",
+        "parentID": "msg_ses_0ff3fixture00001_1",
+        "modelID": "claude-haiku-4-5",
+        "time": {
+          "created": 1790963934500,
+          "completed": 1790963936000
+        },
+        "id": "msg_ses_0ff3fixture00001_2",
+        "sessionID": "ses_0ff3fixture00001"
+      },
+      "parts": [
+        {
+          "type": "step-start",
+          "id": "prt_ses_0ff3fixture00001_3",
+          "messageID": "msg_ses_0ff3fixture00001_2",
+          "sessionID": "ses_0ff3fixture00001"
+        },
+        {
+          "type": "text",
+          "text": "Reading the auth module first.",
+          "time": {
+            "start": 1790963934596,
+            "end": 1790963934981
+          },
+          "id": "prt_ses_0ff3fixture00001_4",
+          "messageID": "msg_ses_0ff3fixture00001_2",
+          "sessionID": "ses_0ff3fixture00001"
+        },
+        {
+          "type": "tool",
+          "tool": "read",
+          "callID": "toolu_0156L5aHDegRahdNMdG7zTv9",
+          "state": {
+            "status": "completed",
+            "input": {
+              "filePath": "/repo/app/auth.ts"
+            },
+            "output": "export const KEY = 1;",
+            "time": {
+              "start": 1790963935000,
+              "end": 1790963935100
+            }
+          },
+          "id": "prt_ses_0ff3fixture00001_5",
+          "messageID": "msg_ses_0ff3fixture00001_2",
+          "sessionID": "ses_0ff3fixture00001"
+        },
+        {
+          "type": "step-finish",
+          "reason": "tool-calls",
+          "id": "prt_ses_0ff3fixture00001_6",
+          "messageID": "msg_ses_0ff3fixture00001_2",
+          "sessionID": "ses_0ff3fixture00001"
+        }
+      ]
+    },
+    {
+      "info": {
+        "role": "assistant",
+        "parentID": "msg_ses_0ff3fixture00001_1",
+        "modelID": "claude-haiku-4-5",
+        "time": {
+          "created": 1790963937000,
+          "completed": 1790963941100
+        },
+        "id": "msg_ses_0ff3fixture00001_3",
+        "sessionID": "ses_0ff3fixture00001"
+      },
+      "parts": [
+        {
+          "type": "text",
+          "text": "Auth reads KEY; the token is ghp_abcdefghijklmnopqrstuvwxyz012345 here.",
+          "id": "prt_ses_0ff3fixture00001_7",
+          "messageID": "msg_ses_0ff3fixture00001_3",
+          "sessionID": "ses_0ff3fixture00001"
+        }
+      ]
+    }
+  ]
+}

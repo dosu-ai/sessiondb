@@ -1,0 +1,29 @@
+[
+  {
+    "role": "meta",
+    "source": "claude-code",
+    "cwd": "/repo/app",
+    "git_branch": "main",
+    "model": "claude-x"
+  },
+  {
+    "role": "user",
+    "content": "line one   \r\nline two\t\t\r\n nbsp at start and end \nfeff at end﻿\nunit sep at end\u001f\nideographic　\n\n\n",
+    "timestamp": "2026-09-01T00:00:01.000Z"
+  },
+  {
+    "role": "assistant",
+    "content": "trailing ls  psnel  ",
+    "timestamp": "2026-09-01T00:00:02.000Z"
+  },
+  {
+    "role": "user",
+    "content": "nul\u0000inside and at end\u0000",
+    "timestamp": "2026-09-01T00:00:03.000Z"
+  },
+  {
+    "role": "assistant",
+    "content": "ok \u0000 ",
+    "timestamp": "2026-09-01T00:00:04.000Z"
+  }
+]

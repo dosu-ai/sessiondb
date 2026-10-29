@@ -1,0 +1,38 @@
+{
+  "rejected": false,
+  "content_hash": "17641e4566b766aa21179cf13c4159377546f2cfa88ee3e967e8f7267d041760",
+  "source": "claude-code",
+  "started_at": "2026-09-01T00:00:01.000Z",
+  "ended_at": "2026-09-01T00:00:04.000Z",
+  "metadata": {
+    "cwd": "/repo/app",
+    "git_branch": "main",
+    "model": "claude-x"
+  },
+  "events": [
+    {
+      "index": 0,
+      "role": "user",
+      "text": "line one\nline two\n nbsp at start and end\nfeff at end﻿\nunit sep at end\nideographic\n\n\n",
+      "timestamp": "2026-09-01T00:00:01.000Z"
+    },
+    {
+      "index": 1,
+      "role": "assistant",
+      "text": "trailing ls  psnel",
+      "timestamp": "2026-09-01T00:00:02.000Z"
+    },
+    {
+      "index": 2,
+      "role": "user",
+      "text": "nulinside and at end",
+      "timestamp": "2026-09-01T00:00:03.000Z"
+    },
+    {
+      "index": 3,
+      "role": "assistant",
+      "text": "ok",
+      "timestamp": "2026-09-01T00:00:04.000Z"
+    }
+  ]
+}

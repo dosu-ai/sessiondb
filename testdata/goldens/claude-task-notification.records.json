@@ -1,0 +1,44 @@
+[
+  {
+    "role": "meta",
+    "source": "claude-code"
+  },
+  {
+    "role": "user",
+    "content": "Launch a background agent to count README lines.",
+    "timestamp": "2026-09-01T00:00:01.000Z"
+  },
+  {
+    "role": "assistant",
+    "content": null,
+    "tool_calls": [
+      {
+        "id": "toolu_1",
+        "name": "Agent",
+        "args": "{}"
+      }
+    ],
+    "timestamp": "2026-09-01T00:00:02.000Z"
+  },
+  {
+    "role": "tool",
+    "tool_call_id": "toolu_1",
+    "content": "launched",
+    "timestamp": "2026-09-01T00:00:03.000Z"
+  },
+  {
+    "role": "observation",
+    "content": "<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>\n<result>README.md has 4 lines.</result>\n</task-notification>",
+    "timestamp": "2026-09-01T00:00:04.000Z"
+  },
+  {
+    "role": "observation",
+    "content": "<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>\n<result>README.md has 4 lines.</result>\n</task-notification>",
+    "timestamp": "2026-09-01T00:00:05.000Z"
+  },
+  {
+    "role": "assistant",
+    "content": "The agent counted 4 lines.",
+    "timestamp": "2026-09-01T00:00:06.000Z"
+  }
+]

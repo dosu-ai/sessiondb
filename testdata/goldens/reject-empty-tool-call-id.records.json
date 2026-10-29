@@ -1,0 +1,26 @@
+[
+  {
+    "role": "meta",
+    "source": "claude-code",
+    "cwd": "/repo/app",
+    "git_branch": "main",
+    "model": "claude-x"
+  },
+  {
+    "role": "user",
+    "content": "x",
+    "timestamp": "2026-09-01T00:00:01.000Z"
+  },
+  {
+    "role": "assistant",
+    "content": null,
+    "tool_calls": [
+      {
+        "id": "",
+        "name": "Bash",
+        "args": "{}"
+      }
+    ],
+    "timestamp": "2026-09-01T00:00:02.000Z"
+  }
+]

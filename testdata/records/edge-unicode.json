@@ -1,0 +1,16 @@
+[
+  {
+    "role": "meta",
+    "source": "codex"
+  },
+  {
+    "role": "user",
+    "content": "日本語のテスト 🚀 café é 𝔘𝔫𝔦𝔠𝔬𝔡𝔢",
+    "timestamp": "2026-09-01T00:00:01.000Z"
+  },
+  {
+    "role": "assistant",
+    "content": "Ünïcödé ✓ — “quotes” …",
+    "timestamp": "2026-09-01T00:00:02.000Z"
+  }
+]

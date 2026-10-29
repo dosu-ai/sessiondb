@@ -1,0 +1,22 @@
+{
+  "rejected": false,
+  "content_hash": "0642f04bf610b5cbc34303287d048c8cd707a516fce57e8febadc2af77c3404b",
+  "source": "chat:slack",
+  "started_at": "2026-09-01T00:00:02.000Z",
+  "ended_at": "2026-09-01T00:00:02.000Z",
+  "metadata": {},
+  "events": [
+    {
+      "index": 0,
+      "role": "user",
+      "text": "hello",
+      "timestamp": null
+    },
+    {
+      "index": 1,
+      "role": "user",
+      "text": "anyone?",
+      "timestamp": "2026-09-01T00:00:02.000Z"
+    }
+  ]
+}

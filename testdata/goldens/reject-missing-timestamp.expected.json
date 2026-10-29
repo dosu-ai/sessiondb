@@ -1,0 +1,4 @@
+{
+  "rejected": true,
+  "error": "record 1: timestamp must be a string"
+}

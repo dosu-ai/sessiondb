@@ -1,0 +1,50 @@
+{
+  "rejected": false,
+  "content_hash": "826a4a0c9a09f1df38f50de134f2cef53bfe5a604a00d3ed74bafea5b5927434",
+  "source": "claude-code",
+  "started_at": "2026-09-01T00:00:01.000Z",
+  "ended_at": "2026-09-01T00:00:06.000Z",
+  "metadata": {},
+  "events": [
+    {
+      "index": 0,
+      "role": "user",
+      "text": "Launch a background agent to count README lines.",
+      "timestamp": "2026-09-01T00:00:01.000Z"
+    },
+    {
+      "index": 1,
+      "role": "tool_call",
+      "text": "Agent {}",
+      "timestamp": "2026-09-01T00:00:02.000Z",
+      "tool_name": "Agent",
+      "tool_call_id": "toolu_1"
+    },
+    {
+      "index": 2,
+      "role": "tool_result",
+      "text": "launched",
+      "timestamp": "2026-09-01T00:00:03.000Z",
+      "tool_call_id": "toolu_1",
+      "tool_name": "Agent"
+    },
+    {
+      "index": 3,
+      "role": "observation",
+      "text": "<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>\n<result>README.md has 4 lines.</result>\n</task-notification>",
+      "timestamp": "2026-09-01T00:00:04.000Z"
+    },
+    {
+      "index": 4,
+      "role": "observation",
+      "text": "<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>\n<result>README.md has 4 lines.</result>\n</task-notification>",
+      "timestamp": "2026-09-01T00:00:05.000Z"
+    },
+    {
+      "index": 5,
+      "role": "assistant",
+      "text": "The agent counted 4 lines.",
+      "timestamp": "2026-09-01T00:00:06.000Z"
+    }
+  ]
+}

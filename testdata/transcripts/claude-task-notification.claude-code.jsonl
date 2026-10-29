@@ -1,0 +1,6 @@
+{"type":"user","uuid":"u1","timestamp":"2026-09-01T00:00:01.000Z","sessionId":"bg","message":{"role":"user","content":"Launch a background agent to count README lines."}}
+{"type":"assistant","uuid":"a2","timestamp":"2026-09-01T00:00:02.000Z","sessionId":"bg","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"Agent","input":{}}]}}
+{"type":"user","uuid":"u3","timestamp":"2026-09-01T00:00:03.000Z","sessionId":"bg","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"launched"}]}}
+{"type":"user","uuid":"u4","timestamp":"2026-09-01T00:00:04.000Z","sessionId":"bg","message":{"role":"user","content":"<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>\n<result>README.md has 4 lines.</result>\n</task-notification>"},"origin":{"kind":"task-notification"}}
+{"type":"user","uuid":"u5","timestamp":"2026-09-01T00:00:05.000Z","sessionId":"bg","message":{"role":"user","content":[{"type":"text","text":"<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>\n<result>README.md has 4 lines.</result>\n</task-notification>"}]}}
+{"type":"assistant","uuid":"a6","timestamp":"2026-09-01T00:00:06.000Z","sessionId":"bg","message":{"role":"assistant","content":[{"type":"text","text":"The agent counted 4 lines."}]}}

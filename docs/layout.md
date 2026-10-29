@@ -1,0 +1,157 @@
+# The sessionstorage layout
+
+The object layout is the contract. Anything that can read objects under a
+prefix — the sessiondb server's own routes, another service, `aws s3 sync` — can read
+a sessionstorage store. (`sessionstorage` names the layout; `sessiondb` is the server that
+writes it.) The server is the only writer today; any other writer must follow the rules below.
+
+```
+<prefix>/
+  sessionstorage.json                                      layout marker, written once
+  owners/<owner>/
+    .probe                                            a writer's write check
+    sessions/<archive_id>/
+      metadata.json                                   the session's pointer (mutable)
+      trace.<content_hash>.json.gz                    one per distinct content (immutable)
+      raw.<n>.<jsonl|json>.gz                         optional native transcript parts
+    changes/
+      <stamp>-<content_hash>.json                     a publish
+      <stamp>-tombstone.json                          a tombstone
+```
+
+## Identifiers
+
+- **owner** is one path segment (`[A-Za-z0-9][A-Za-z0-9._-]{0,127}`): the
+  name a server token is bound to, usually a person. One owner's objects never
+  reference another's, and a token reads only its own owner's.
+- **archive_id** = `sha256(owner + "\n" + agent + "\n" + session_id)` (hex).
+  Deterministic, so every upload of one session lands in one directory;
+  derived, so no native id or path appears in a key.
+- **content_hash** = `sha256(source + "\n" + body)` where `body` joins the
+  trace's events as `role + "\x1f" + text` with `"\x1e"`. Timestamps are
+  outside the hash, so a re-export of the same conversation dedupes. The exact
+  derivation of events and `text` is in [`src/trace/parse.ts`](../src/trace/parse.ts),
+  pinned by the goldens in `testdata/goldens/`.
+- **stamp** in a change key is RFC 3339 UTC to the millisecond with `-` and
+  `:` removed (`20261021T210405.123Z`), so keys sort by time and are valid
+  file names everywhere.
+
+## Objects
+
+### `trace.<content_hash>.json.gz` — `sessionstorage/trace/1`
+
+Immutable and content-addressed. First writer wins: if the key exists, a
+later publish does not overwrite it, whatever differs outside the hash.
+
+```jsonc
+{
+  "schema": "sessionstorage/trace/1",
+  "content_hash": "…",
+  "source": "claude-code",          // what normalized it (trajectory-v1 meta.source)
+  "agent": "claude-code",           // what the client posted it as; the archive id derives from it
+  "project": "github.com/acme/widget",
+  "branch": "main",
+  "session_id": "…",
+  "started_at": "2026-09-01T00:00:00.000Z",
+  "ended_at": "2026-09-01T00:00:07.000Z",
+  "records": [ /* trajectory-v1, redacted, NUL-stripped */ ],
+  "events": [
+    { "index": 0, "role": "user", "text": "…", "timestamp": "…" },
+    { "index": 1, "role": "tool_call", "text": "Read {\"file_path\":…}", "timestamp": "…",
+      "tool_name": "Read", "tool_call_id": "toolu_…" },
+    { "index": 2, "role": "tool_result", "text": "…", "timestamp": "…",
+      "tool_name": "Read", "tool_call_id": "toolu_…", "ok": true }
+  ],
+  "metadata": {
+    "cwd": "/repo/app", "git_branch": "main", "model": "…",   // from the meta record
+    "parent_session_id": "…",                                 // lineage, when known at first publish
+    "continuation": { "from_record": 6, "prefix_sha256": "…" },
+    "trace_context": { "trace_id": "…", "span_id": "…" },
+    "normalizer": { "name": "sessiondb-server", "version": "0.1.0+trajectory.0.3.0" }
+  }
+}
+```
+
+`events[i].index` is stable for the object's lifetime; anything that addresses
+a span of a session does so by event index range.
+
+`metadata.normalizer` names what produced `records`: the server release and, as
+semver build metadata, the `@letta-ai/trajectory` it ran. A re-normalization
+pass (a `renormalized` change) selects the traces to redo by it.
+
+### `metadata.json` — `sessionstorage/metadata/1`
+
+The live pointer. Rewritten on every publish, last writer wins.
+
+```jsonc
+{
+  "schema": "sessionstorage/metadata/1",
+  "owner": "acme", "archive_id": "…", "session_id": "…",
+  "agent": "claude-code", "source": "claude-code",
+  "project": "github.com/acme/widget", "branch": "main",
+  "parent_session_id": "…",
+  "status": "stored",                // or "redacted"
+  "head": "<content_hash>",          // absent once redacted
+  "traces": [
+    { "content_hash": "…", "created_at": "…", "records": 10 },
+    { "content_hash": "…", "created_at": "…", "records": 5,
+      "continuation": { "from_record": 6, "prefix_sha256": "…" } }
+  ],
+  "raw": [ { "part": 0, "format": "jsonl", "size": 1234, "sha256": "…", "created_at": "…" } ],
+  "raw_format": "jsonl",
+  "created_at": "…", "updated_at": "…"
+}
+```
+
+A session that grew after it was stored gets a second trace with a
+`continuation`: the tail's records, hashed on their own, plus where in the
+full session they start and a hash of what came before. A reader that wants
+the whole session concatenates in `traces` order.
+
+### `raw.<n>.<format>.gz`
+
+The native transcript, redacted line by line (`jsonl`) or as a document
+(`json`), gzipped. Never parsed by the store; kept so history can be
+re-normalized when adapters improve. It is the log as the harness wrote it,
+before the server's per-source fixups, so a re-normalization must run the
+server's `normalizeTranscript` (fixups included), not the adapter alone.
+Part-numbered: the same bytes at the same part are a no-op, different bytes
+replace.
+
+### `changes/<stamp>-<hash|tombstone>.json` — `sessionstorage/change/1`
+
+One per publish or tombstone, append-only. The feed a consumer tails with a
+cursor (the last key processed) and a lag window, since the stamps come from
+laptop clocks.
+
+```json
+{ "schema": "sessionstorage/change/1", "kind": "published", "at": "…",
+  "owner": "acme", "archive_id": "…", "session_id": "…", "content_hash": "…" }
+```
+
+`kind` is `published`, `tombstone`, or `renormalized`.
+
+## The publish protocol
+
+1. Write the object. For a trace, skip if the key exists.
+2. Verify: compare the backend's ETag to the body's MD5 when the ETag is a
+   plain MD5 (single-part PUT on S3, R2, MinIO, and the `fs` store); otherwise
+   read the object back and compare hashes.
+3. Rewrite `metadata.json`.
+4. Append the change entry.
+
+A writer that dies between steps leaves either nothing visible (before 3) or
+an object without a change entry (between 3 and 4); the next publish of the
+same content completes it. Two writers publishing the same content converge
+on one object; publishing different content for one session is last-writer-wins
+on the pointer and both traces stay listed.
+
+## Reading
+
+- One session: `metadata.json`, then `trace.<head>.json.gz`.
+- Everything new since a cursor: list `changes/` with `StartAfter`, fetch what
+  the entries point at.
+- A full scan: list `sessions/`, read each `metadata.json`.
+
+A reader needs `s3:ListBucket` on the prefix and `s3:GetObject` under it. A
+writer additionally needs `s3:PutObject`; tombstoning needs `s3:DeleteObject`.

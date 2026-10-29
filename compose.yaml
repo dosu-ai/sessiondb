@@ -1,0 +1,14 @@
+# sessiondb in a container. Fill in `.env` (copy `.env.example`: the token, the bucket URL and
+# its keys), then `docker compose up -d`. The /data volume only matters for a file:// store.
+services:
+  sessiondb:
+    build: .
+    env_file: .env
+    ports:
+      - "${SESSIONDB_PORT:-7200}:7200"
+    volumes:
+      - sessiondb-data:/data
+    restart: unless-stopped
+
+volumes:
+  sessiondb-data:
