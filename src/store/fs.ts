@@ -1,7 +1,6 @@
 /** A directory as a `Store`: the local target, and what tests use. Writes are temp + rename so a
- * reader never sees a partial object. The ETag is the file's size and mtime, not an MD5: a
- * `stat` must not read the file (the scanner stats every synced session file on every pass), so
- * `publish` verifies a write here by reading it back. */
+ * reader never sees a partial object. The ETag is the file's size and mtime, not an MD5, so a
+ * `stat` never reads the file; `publish` verifies a write here by reading it back. */
 
 import { randomBytes } from "node:crypto";
 import {

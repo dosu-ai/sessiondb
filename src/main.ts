@@ -10,14 +10,10 @@
  * - bucket credentials     `s3://`: `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` (or `S3_*`),
  *                          `AWS_REGION`; `r2://`: `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`,
  *                          `R2_SECRET_ACCESS_KEY`; S3-compatible: `S3_ENDPOINT` with the `AWS_*` keys
- * - `SESSIONDB_SCAN_INTERVAL`
- *                          seconds between scans of each owner's folder for Datadog Trajectory
- *                          session files synced into the bucket; default 300, `0` to never scan
  * - `PORT`                 default 7200
  */
 
 import { createApp, type StorageView, type TokenGrant } from "./app";
-import { createScanner } from "./ingest/scan";
 import { FsStore } from "./store/fs";
 import { assertOwner } from "./store/layout";
 import { ensureLayout, probe } from "./store/publish";
@@ -108,46 +104,7 @@ console.log(
   `sessiondb-server ${VERSION} listening on http://localhost:${server.port}, writing ${url} for ${owners.join(", ")}`,
 );
 
-// Datadog Trajectory session files synced into an owner's folder: scanned at boot and on an
-// interval, in the background, never in the way of a request.
-const scanInterval = Number.parseInt(process.env.SESSIONDB_SCAN_INTERVAL ?? "300", 10);
-if (!Number.isInteger(scanInterval) || scanInterval < 0) {
-  fail("SESSIONDB_SCAN_INTERVAL must be a number of seconds (0 to disable)");
-}
-let scanTimer: ReturnType<typeof setInterval> | undefined;
-if (scanInterval > 0) {
-  const scanner = createScanner({
-    store,
-    owners,
-    client,
-    onFile: (r) => {
-      if (r.outcome === "duplicate") return;
-      console.log(`[sessiondb] scan ${r.outcome} ${r.key}${r.detail ? ` (${r.detail})` : ""}`);
-    },
-  });
-  let scanning = false;
-  const scan = async () => {
-    if (scanning) return;
-    scanning = true;
-    try {
-      const s = await scanner.scan();
-      if (s.read > 0) {
-        console.log(
-          `[sessiondb] scan: ${s.read} read, ${s.stored} stored, ${s.duplicate} duplicate, ${s.trivial} trivial, ${s.rejected} rejected`,
-        );
-      }
-    } catch (err) {
-      console.error(`[sessiondb] scan failed: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      scanning = false;
-    }
-  };
-  void scan();
-  scanTimer = setInterval(scan, scanInterval * 1000);
-}
-
 function shutdown(): void {
-  if (scanTimer) clearInterval(scanTimer);
   server.stop();
   process.exit(0);
 }

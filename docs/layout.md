@@ -18,14 +18,11 @@ writes it.) The server is the only writer today; any other writer must follow th
     changes/
       <stamp>-<content_hash>.json                     a publish
       <stamp>-tombstone.json                          a tombstone
-    <anything else>/                                  the owner's, not the layout's (see below)
 ```
 
-An owner's folder may hold objects that are not the layout's: a Datadog
-Trajectory directory synced there as-is, which the server reads sessions
-from ([server.md](server.md#a-synced-trajectory-install)). The layout's own
-objects are exactly the keys named above; a reader ignores the rest, and a
-writer never puts anything under `sessions/` or `changes/` that is not.
+The layout's own objects are exactly the keys named above; a reader ignores
+anything else under the prefix, and a writer never puts anything under
+`sessions/` or `changes/` that is not.
 
 ## Identifiers
 

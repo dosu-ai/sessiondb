@@ -77,21 +77,14 @@ server keeps where the log stands, so a large session costs each time only what 
 The full API, every environment variable, and the rules for chunks, continuations and forks
 are in [`docs/server.md`](docs/server.md).
 
-### Storage already in Datadog Trajectory's format
+### Datadog Trajectory's format
 
 [Datadog Trajectory](https://github.com/datadog-labs/trajectory) records coding-agent sessions
 in a format of its own, one file per session under `~/.trajectory/trajectories/sessions/`.
-sessiondb reads that format. Put those files in the bucket under the person's folder and
-there is nothing to post: the server scans each owner's folder on an interval, normalizes every
-Trajectory session file it finds there to Letta trajectory-v1 like any other transcript, reads
-only what each file gained since the last scan, and leaves the files where they are.
-
-```sh
-aws s3 sync ~/.trajectory s3://bucket/prefix/owners/alice/.trajectory
-```
-
-A single file in that format can also be posted as `agent: "datadog-trajectory"`. Nothing in
-sessiondb depends on the Trajectory daemon or CLI; it is one more input format.
+sessiondb reads that format: post the file as `agent: "datadog-trajectory"`, whole or in chunks
+as the daemon appends to it, and it is normalized to Letta trajectory-v1 like any other
+transcript. Nothing in sessiondb depends on the Trajectory daemon or CLI; it is one more input
+format.
 
 ## What the server does with a session
 
@@ -101,8 +94,7 @@ trace is always made from what is in the bucket, and the second step can run aga
 1. **Store.** The native log passes through the redaction pass (provider tokens, key/value
    credentials in several languages, bearer headers, JWTs, connection URLs, PEM blocks, and a
    Shannon-entropy pass for what no pattern knows) and is written as the session's raw part.
-   That creates the session; nothing else has happened yet. A Datadog Trajectory directory
-   synced into the bucket is already this step done.
+   That creates the session; nothing else has happened yet.
 2. **Normalize.** The stored log becomes trajectory-v1 records via
    [`@letta-ai/trajectory`](https://github.com/letta-ai/trajectory), plus the fixups its
    adapters need (Claude Code's queued and background-task input, Codex's inherited history and

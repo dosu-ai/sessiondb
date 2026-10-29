@@ -20,8 +20,8 @@
  * has one, every chunk with records in it ships. Whether a session is worth a trace is decided
  * once, not per chunk.
  *
- * The HTTP routes call `storeSession` with what they read off the wire; the bucket scan calls
- * it with what grew in an owner's folder. Nothing here knows about HTTP. */
+ * The HTTP routes call `storeSession` with what they read off the wire. Nothing here knows
+ * about HTTP. */
 
 import { gunzipSync, gzipSync } from "node:zlib";
 import { NORMALIZER, NormalizeError, normalizeTranscript, type Source } from "../normalize";
