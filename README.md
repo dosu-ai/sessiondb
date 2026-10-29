@@ -65,29 +65,52 @@ curl -sS http://localhost:7200/v1/sessions \
 The full API, every environment variable, and the rules for continuations and forks are in
 [`docs/server.md`](docs/server.md).
 
+### Storage already in Datadog Trajectory's format
+
+[Datadog Trajectory](https://github.com/datadog-labs/trajectory) records coding-agent sessions
+in a format of its own, one file per session under `~/.trajectory/trajectories/sessions/`.
+sessiondb reads that format. Put those files in the bucket under the person's folder and
+there is nothing to post: the server scans each owner's folder on an interval, normalizes every
+Trajectory session file it finds there to Letta trajectory-v1 like any other transcript, and
+leaves the files where they are.
+
+```sh
+aws s3 sync ~/.trajectory s3://bucket/prefix/owners/alice/.trajectory
+```
+
+A single file in that format can also be posted as `agent: "datadog-trajectory"`. Nothing in
+sessiondb depends on the Trajectory daemon or CLI; it is one more input format.
+
 ## What the server does with a session
 
-1. **Normalize.** The native log becomes trajectory-v1 records via
+Storage first, then normalize, then the trace. Every way in is the same two steps, so the
+trace is always made from what is in the bucket, and the second step can run again on its own.
+
+1. **Store.** The native log passes through the redaction pass (provider tokens, key/value
+   credentials in several languages, bearer headers, JWTs, connection URLs, PEM blocks, and a
+   Shannon-entropy pass for what no pattern knows) and is written as the session's raw part.
+   That creates the session; nothing else has happened yet. A Datadog Trajectory directory
+   synced into the bucket is already this step done.
+2. **Normalize.** The stored log becomes trajectory-v1 records via
    [`@letta-ai/trajectory`](https://github.com/letta-ai/trajectory), plus the fixups its
    adapters need (Claude Code's queued and background-task input, Codex's inherited history and
    subagent reports). `agent` is the adapter name, one of `claude-code`, `codex`, `cursor`,
-   `opencode`, `pi`, `gemini-cli`.
-2. **Redact.** Every string in the records passes through the redaction pass: provider
-   tokens, key/value credentials in several languages, bearer headers, JWTs, connection URLs,
-   PEM blocks, and a Shannon-entropy pass for what no pattern knows. Identifiers that link a tool call to its
-   result are left alone so the records stay coherent. The raw transcript, if kept, gets the
-   same pass with no exceptions.
+   `opencode`, `pi`, `gemini-cli`, or `datadog-trajectory`, the server's own adapter that turns
+   a Trajectory session file into the same Letta records as everything else. The records get the
+   redaction pass too, with identifiers that link a tool call to its result left alone so they
+   stay coherent.
 3. **Decide what is new.** A conversation under 2000 characters, or with no user turn, or with
-   nothing answering it, is reported as `trivial` and not written. A session uploaded before
-   writes only its tail (the client sends back `records_total` and `prefix_sha256` from the
-   last answer); a fork writes only what it added past the history it copied.
-4. **Hash and store.** `content_hash` is a hash of what was said, independent of timestamps, so
-   re-exporting the same conversation writes nothing. The trace is written under its hash, the
-   session's pointer is updated, and an entry is appended to the change feed.
+   nothing answering it, is reported as `trivial`: the raw part stays, no trace is written. A
+   session uploaded before writes only its tail (the client sends back `records_total` and
+   `prefix_sha256` from the last answer); a fork writes only what it added past the history it
+   copied.
+4. **Hash and publish.** `content_hash` is a hash of what was said, independent of timestamps,
+   so re-exporting the same conversation writes nothing. The trace is written under its hash,
+   the session's pointer gets it as head, and an entry is appended to the change feed.
 
-The layout is the contract, documented in [`docs/layout.md`](docs/layout.md): immutable
-content-addressed traces, one mutable pointer per session, an append-only change feed, and
-optional raw transcript parts so history can be re-normalized when adapters improve.
+The layout is the contract, documented in [`docs/layout.md`](docs/layout.md): raw transcript
+parts, immutable content-addressed traces made from them, one mutable pointer per session, and
+an append-only change feed.
 
 ## Storage
 
