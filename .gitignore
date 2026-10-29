@@ -1,8 +1,5 @@
 node_modules/
-coverage/
-*.tgz
 .env
 .env.*
 !.env.example
 .DS_Store
-data/

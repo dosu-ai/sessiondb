@@ -8,7 +8,7 @@
     "skipLibCheck": true,
     "sourceMap": true,
     "resolveJsonModule": true,
-    "types": ["bun-types"]
+    "types": ["bun"]
   },
   "include": ["src/**/*", "scripts/**/*", "vitest.config.ts"],
   "exclude": ["node_modules", "dist"]

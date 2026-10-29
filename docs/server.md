@@ -51,10 +51,10 @@ Every release is published as a container image, `ghcr.io/dosu-ai/sessiondb:<ver
 from the `Dockerfile` in this repository. It listens on `PORT` (default `7200`), reports
 `/healthz` for liveness, and needs only the environment variables above: there is no database,
 no volume (unless the store is `file://`), no background work, and no state outside the bucket,
-so any platform that runs a container works, scaled to zero or to many instances alike. Keep the request timeout at 120 seconds or more; a large transcript can
-take that long to normalize and verify. Platforms that cap request bodies (Cloud Run's HTTP/1
-limit is 32 MiB) are fine as long as clients send `Content-Encoding: gzip`, which every route
-accepts.
+so any platform that runs a container works, scaled to zero or to many instances alike. Keep
+the request timeout at 120 seconds or more; a large transcript can take that long to normalize
+and verify. Platforms that cap request bodies (Cloud Run's HTTP/1 limit is 32 MiB) are fine as
+long as clients send `Content-Encoding: gzip`, which every route accepts.
 
 ### Who sees what
 

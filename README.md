@@ -88,8 +88,8 @@ format.
 
 ## What the server does with a session
 
-Storage first, then normalize, then the trace. Every way in is the same two steps, so the
-trace is always made from what is in the bucket, and the second step can run again on its own.
+Storage first, then normalize, then the trace. The trace is always made from what is in the
+bucket, so the second step can run again on its own.
 
 1. **Store.** The native log passes through the redaction pass (provider tokens, key/value
    credentials in several languages, bearer headers, JWTs, connection URLs, PEM blocks, and a

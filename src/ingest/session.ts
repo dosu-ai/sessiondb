@@ -1,7 +1,6 @@
-/** One session into the store, however it arrived: the transcript is stored first, as a raw
- * part of the session, and the trace is made from what was stored. So every way in is the same
- * two steps, store → normalize, and the second can run again on its own (an adapter
- * improved, a format was recognized later) without the first.
+/** One session into the store: the transcript is stored first, as a raw part of the session,
+ * and the trace is made from what was stored. Two steps, store → normalize, and the second can
+ * run again on its own (an adapter improved, a format was recognized later) without the first.
  *
  * - `storeSession`: redact the transcript, write it as a raw part (the first one creates the
  *   session), then `normalizeStored`.

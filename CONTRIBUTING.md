@@ -36,7 +36,8 @@ event derivation.
 If a change is meant to alter them, run `bun run goldens` and commit the regenerated files; the
 diff is the review. If it is not, the failure is a bug in the change.
 
-Fixture transcripts are produced by `scripts/fixtures.ts` and contain nothing real. Do not add a
+Fixture transcripts are produced by `bun run fixtures` (`scripts/fixtures.ts`) and contain
+nothing real. Do not add a
 transcript from an actual session to `testdata/`, redacted or not.
 
 ## Redaction rules
