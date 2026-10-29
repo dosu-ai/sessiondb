@@ -208,19 +208,60 @@ describe("putRaw", () => {
     expect(await store.get(keys.raw("acme", archive, 0, "jsonl"))).toEqual(bytes);
   });
 
-  it("refuses a part for a session with no trace", async () => {
-    await expect(
-      putRaw({
+  it("creates the session when the part is the first thing stored, and ingest adds the trace", async () => {
+    const bytes = new Uint8Array([1, 2, 3]);
+    const first = await putRaw({
+      store,
+      owner: "acme",
+      agent: "claude",
+      session_id: "raw-first",
+      part: 0,
+      format: "jsonl",
+      bytes,
+      now,
+    });
+    expect(first).toEqual({ status: "stored", part: 0 });
+    const before = await getSession(store, "acme", "claude", "raw-first");
+    expect(before).toMatchObject({
+      status: "stored",
+      agent: "claude",
+      session_id: "raw-first",
+      traces: [],
+      raw: [{ part: 0, format: "jsonl", size: 3 }],
+    });
+    expect(before?.head).toBeUndefined();
+    expect(before?.source).toBeUndefined();
+    expect((await readChanges(store, "acme")).entries).toEqual([]);
+
+    // The same bytes again: nothing to do.
+    expect(
+      await putRaw({
         store,
         owner: "acme",
         agent: "claude",
-        session_id: "nope",
+        session_id: "raw-first",
         part: 0,
         format: "jsonl",
-        bytes: new Uint8Array(1),
+        bytes,
         now,
       }),
-    ).rejects.toMatchObject({ code: "invalid" });
+    ).toEqual({ status: "exists", part: 0 });
+
+    const stored = await ingest({
+      store,
+      owner: "acme",
+      records: records("claude-basic"),
+      metadata: { ...meta, session_id: "raw-first" },
+      now,
+    });
+    const after = await getSession(store, "acme", "claude", "raw-first");
+    expect(after).toMatchObject({
+      head: stored.content_hash,
+      source: "claude-code",
+      created_at: before?.created_at,
+      raw: [{ part: 0 }],
+    });
+    expect(after?.traces).toHaveLength(1);
   });
 });
 

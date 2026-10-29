@@ -1,5 +1,5 @@
-/** Redaction of a native transcript kept beside its trace (`keep_raw`). The store never parses a
- * raw part; it exists so history can be re-normalized when adapters improve. Two passes, by
+/** Redaction of a native transcript before it is stored as a session's raw part, the first
+ * object written for a session and what its trace is normalized from. Two passes, by
  * `RawFormat`:
  *
  * - `jsonl` (Claude Code, Cursor, Codex, pi): each line parsed, every string value redacted, keys
