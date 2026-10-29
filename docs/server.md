@@ -1,16 +1,18 @@
 # The sessiondb server
 
-A client posts the raw transcript of a finished session; the server normalizes it to
-trajectory-v1, redacts it, decides whether it is worth keeping and how much of it is new, and
-writes it to the bucket in the [layout](layout.md). Anything that reads the layout reads the
+A client posts the raw transcript of a finished session; the server redacts it and writes it to
+the bucket as the session's raw part, then normalizes what it stored to trajectory-v1, decides
+whether it is worth a trace and how much of it is new, and writes the trace beside it, in the
+[layout](layout.md). Storage first, then normalize: a Datadog Trajectory directory synced
+into the bucket is the first step already done, and the server picks it up at the second. Anything that reads the layout reads the
 bucket directly: the server is the only writer and no reader's dependency.
 
 ```
 client ──POST /v1/sessions (raw transcript, bearer token)──▶ sessiondb server
-                                                               normalize · redact · ingest()
-                                                                    │
-                                                                    ▼
-                                                   the bucket (s3:// r2:// file://)
+                                                               store raw · normalize · trace
+                                                                    │        ▲
+                                                                    ▼        │ scan: Trajectory-format files
+                                                   the bucket (s3:// r2:// file://)   under owners/<name>/
                                                                     ▲
                                                  readers tail changes/ (their own read-only key)
 ```
@@ -39,6 +41,7 @@ session.
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | for `r2://` | |
 | `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | for `s3://` | Or Bun's `S3_*` equivalents; `S3_ENDPOINT` for MinIO, Backblaze, Wasabi… |
 | `PORT` | | Default `7200` |
+| `SESSIONDB_SCAN_INTERVAL` | | Seconds between scans of each owner's folder for [Datadog Trajectory session files synced into the bucket](#a-synced-trajectory-install). Default `300`; `0` never scans |
 
 Put TLS in front of it (a reverse proxy, Cloud Run, a load balancer): transcripts arrive
 unredacted and the server is where that stops being true.
@@ -77,8 +80,9 @@ A reader never talks to the server. Give it a read-only credential on the bucket
 
 ## API
 
-All bodies are JSON. Errors are `{ "error": { "code", "message" } }`. Request bodies may be
-`Content-Encoding: gzip`. Every route but `/healthz` wants `Authorization: Bearer <token>`.
+All bodies are JSON unless a route says otherwise. Errors are `{ "error": { "code", "message" } }`.
+Request bodies may be `Content-Encoding: gzip`. Every route but `/healthz` wants
+`Authorization: Bearer <token>`.
 
 | | |
 |---|---|
@@ -87,7 +91,7 @@ All bodies are JSON. Errors are `{ "error": { "code", "message" } }`. Request bo
 | `POST /v1/sessions` | Store a session; see below |
 | `GET /v1/sessions?limit&after` | List |
 | `GET /v1/sessions/:agent/:session_id` | The session's `metadata.json` |
-| `GET /v1/sessions/:agent/:session_id/trace?hash` | The head trace (or a specific one); `410` once redacted |
+| `GET /v1/sessions/:agent/:session_id/trace?hash` | The head trace (or a specific one); `404 no_trace` while raw only, `410` once redacted |
 | `DELETE /v1/sessions/:agent/:session_id` | Tombstone: drop trace and raw objects, append a tombstone change. Irreversible; a later upload of the same session is refused |
 | `GET /v1/changes?after&since&limit` | The change feed |
 | `GET /v1/objects?prefix&after&limit` | List keys under `owners/<owner>/` |
@@ -97,7 +101,8 @@ All bodies are JSON. Errors are `{ "error": { "code", "message" } }`. Request bo
 
 ```jsonc
 {
-  "agent": "claude-code",          // the trajectory source: claude-code, codex, cursor, opencode, pi, gemini-cli
+  "agent": "claude-code",          // the transcript format: claude-code, codex, cursor, opencode, pi, gemini-cli,
+                                   // or datadog-trajectory (a Trajectory session file, see below)
   "session_id": "…",
   "transcript": "…",               // the native log, verbatim
   "format": "jsonl",               // or "json" (OpenCode exports); how the raw copy is redacted
@@ -105,16 +110,17 @@ All bodies are JSON. Errors are `{ "error": { "code", "message" } }`. Request bo
   "branch": "main",                // the client's best guess; the transcript's own record wins
   "parent_session_id": "…",        // the session this one was resumed or forked from
   "fork_of": "…",                  // a fork: the parent whose history this log begins with
-  "shipped": { "records": 12, "prefix_sha256": "…" },   // what the last answer said; see below
-  "keep_raw": true                 // store the redacted native log beside the trace (default)
+  "shipped": { "records": 12, "prefix_sha256": "…" }    // what the last answer said; see below
 }
 ```
 
-The server normalizes, redacts, and decides:
+The server redacts the transcript and stores it as the session's raw part, part 0, replacing
+the one before (the raw copy is always the whole current log). That creates the session. It then
+normalizes what it stored, redacts the records, and decides:
 
-- **Worth keeping?** Under 2000 characters of conversation (or no user turn, or nothing
-  answering it) is a greeting, not an investigation: `200 { "status": "trivial", … }` and
-  nothing is written.
+- **Worth a trace?** Under 2000 characters of conversation (or no user turn, or nothing
+  answering it) is a greeting, not an investigation: `200 { "status": "trivial", … }`; the raw
+  part stays and no trace is written, so the session is there with no head.
 - **How much is new?** A client that shipped the session before sends back the `records_total`
   and `prefix_sha256` from that answer as `shipped`. If the session's records still begin with
   that prefix, only the meta record plus the tail is written, marked as a continuation; if not
@@ -135,13 +141,75 @@ trivial:
 
 `records` is what this upload wrote; `records_total` and `prefix_sha256` describe the whole
 normalized session and are what the client stores as `shipped` for next time (every status
-returns them, `trivial` included). `raw.status` is `stored`, `exists`, `skipped`
-(`keep_raw: false`) or `too_large` (the trace was still written). The raw copy is always the
-whole current log, replacing part 0.
+returns them, `trivial` included). `raw.status` is `stored` or `exists` (the same bytes were
+already part 0).
 
 `422` with a code is final for that upload (resending the same bytes cannot succeed):
-`unsupported_agent`, `empty` (no conversation), `normalize_<code>`, `invalid`, `too_large`,
-`redacted`. `502 storage_error` is the bucket failing and is retryable.
+`unsupported_agent`, `too_large` (the transcript is over the raw-part cap; nothing is stored),
+`redacted`, and after the raw part is stored, `empty` (no conversation), `normalize_<code>`,
+`invalid`: the raw part stays for a later normalizer. `502 storage_error` is the bucket failing
+and is retryable.
 
 `agent` is part of the archive id (`sha256(owner, agent, session_id)`), which is why only the
 trajectory source name is accepted (`claude-code`, not `claude`): one spelling, one archive.
+
+### Datadog Trajectory's format
+
+[Trajectory](https://github.com/datadog-labs/trajectory) is Datadog's capture daemon for coding
+agents. It records each session it captures, from Claude Code, Codex, Cursor, Pi and the other
+clients it supports, as one canonical event per line in a file of its own format, at
+`~/.trajectory/trajectories/sessions/<date>/session-<id>.jsonl`. This server reads that format.
+It has no dependency on the daemon or its CLI and no endpoint for it; `datadog-trajectory` is
+one more transcript format, normalized to trajectory-v1 by the server's own adapter
+(`@letta-ai/trajectory` has none for it) and stored like every other.
+
+Two ways a file in that format gets in:
+
+- Posted, as `POST /v1/sessions` with `agent: "datadog-trajectory"` and the file as
+  `transcript`. A file with no `session_end` is a session that was still running when it was
+  copied; it normalizes to what it has so far.
+- Found in the bucket: the owner's Trajectory directory synced under their folder, below.
+
+The session is filed as `agent: datadog-trajectory` and its trace's `source` names the client
+the daemon captured, `datadog-trajectory:claude-code`, so a session captured both ways (a
+client posting the native log and the same session in Trajectory's format) is two archives,
+each honest about what normalized it. `session_id`, `git_branch` and `parent_session_id` come
+from the file's `session_start`; the branch is the one the daemon recorded.
+
+What the adapter keeps: `user_prompt` / `input_prompt` as user records (as observations when
+the daemon attributes them to something other than a person), `tool_use` with `phase: pre` as
+tool calls under the client's own tool name, `phase: post` as results with `ok` from `success`,
+and `agent_message` as reasoning and assistant records. Accounting and lifecycle events
+(`llm_call`, `turn_end`, `inventory.snapshot`, permissions, subagent start and stop) carry no
+conversation and are dropped; a subagent's answer arrives as the `Agent` tool's result, and its
+own session as its own file. A file with no `session_start` gets `422
+normalize_missing_session_start`.
+
+#### A Trajectory directory in the bucket
+
+Sync the directory into the bucket under the owner's folder, and the server finds the sessions
+there; nothing is posted and no URL is configured anywhere.
+
+```bash
+aws s3 sync ~/.trajectory s3://bucket/prefix/owners/alice/.trajectory
+```
+
+At boot and every `SESSIONDB_SCAN_INTERVAL` seconds (default 300) the server lists each
+owner's folder, for every owner it has a token for, and reads every `session-<id>.jsonl` it
+finds anywhere under it: Trajectory's own naming, so the directory can land at any subpath.
+A finished file goes through the same pipeline a POST does (a redacted copy as the session's
+raw part, then the trace from it), filed under `agent: datadog-trajectory` with `source:
+datadog-trajectory:<client>`; a file without `session_end` is a session that was still running
+when it was synced, and is left for the scan after the sync rewrites it. The synced files are never touched, so `aws s3 sync` keeps
+working, and a file is read once per version (the server remembers each key's ETag), so an
+unchanged file costs a `stat` per scan. A restart reads everything once more and, because the
+content hash dedupes, writes nothing new. What a scan did is in the server log, one line per
+stored, trivial or rejected file and a summary per scan that read anything.
+
+A session the daemon imported from a client's own history (`trajectory session import`) is
+thinner than one it captured live: no prose from the agent, and tool calls present only as
+their results. The adapter reads those too, and most come out `trivial`, which is right: there
+is no conversation in them.
+
+The synced files are Trajectory's, not this server's: unredacted, under the owner's folder,
+beside the redacted archive. See [`SECURITY.md`](../SECURITY.md).

@@ -12,12 +12,20 @@ writes it.) The server is the only writer today; any other writer must follow th
     .probe                                            a writer's write check
     sessions/<archive_id>/
       metadata.json                                   the session's pointer (mutable)
-      trace.<content_hash>.json.gz                    one per distinct content (immutable)
-      raw.<n>.<jsonl|json>.gz                         optional native transcript parts
+      raw.<n>.<jsonl|json>.gz                         the native transcript, stored first
+      trace.<content_hash>.json.gz                    one per distinct content (immutable),
+                                                      made from the raw
     changes/
       <stamp>-<content_hash>.json                     a publish
       <stamp>-tombstone.json                          a tombstone
+    <anything else>/                                  the owner's, not the layout's (see below)
 ```
+
+An owner's folder may hold objects that are not the layout's: a Datadog
+Trajectory directory synced there as-is, which the server reads sessions
+from ([server.md](server.md#a-synced-trajectory-install)). The layout's own
+objects are exactly the keys named above; a reader ignores the rest, and a
+writer never puts anything under `sessions/` or `changes/` that is not.
 
 ## Identifiers
 
@@ -47,7 +55,8 @@ later publish does not overwrite it, whatever differs outside the hash.
 {
   "schema": "sessionstorage/trace/1",
   "content_hash": "…",
-  "source": "claude-code",          // what normalized it (trajectory-v1 meta.source)
+  "source": "claude-code",          // what normalized it (trajectory-v1 meta.source); a session
+                                    // in Datadog Trajectory's format is "datadog-trajectory:claude-code"
   "agent": "claude-code",           // what the client posted it as; the archive id derives from it
   "project": "github.com/acme/widget",
   "branch": "main",
@@ -81,17 +90,20 @@ pass (a `renormalized` change) selects the traces to redo by it.
 
 ### `metadata.json` — `sessionstorage/metadata/1`
 
-The live pointer. Rewritten on every publish, last writer wins.
+The live pointer. Written when the session's first raw part is stored, rewritten
+on every publish, last writer wins. A session exists from its raw part on: one
+whose transcript normalized to nothing worth a trace (a greeting) has `raw`, an
+empty `traces`, and no `head` or `source`, and never appears in `changes/`.
 
 ```jsonc
 {
   "schema": "sessionstorage/metadata/1",
   "owner": "acme", "archive_id": "…", "session_id": "…",
-  "agent": "claude-code", "source": "claude-code",
+  "agent": "claude-code", "source": "claude-code",   // source: absent until a trace is stored
   "project": "github.com/acme/widget", "branch": "main",
   "parent_session_id": "…",
   "status": "stored",                // or "redacted"
-  "head": "<content_hash>",          // absent once redacted
+  "head": "<content_hash>",          // absent before a trace is stored, and once redacted
   "traces": [
     { "content_hash": "…", "created_at": "…", "records": 10 },
     { "content_hash": "…", "created_at": "…", "records": 5,
@@ -111,10 +123,12 @@ the whole session concatenates in `traces` order.
 ### `raw.<n>.<format>.gz`
 
 The native transcript, redacted line by line (`jsonl`) or as a document
-(`json`), gzipped. Never parsed by the store; kept so history can be
-re-normalized when adapters improve. It is the log as the harness wrote it,
-before the server's per-source fixups, so a re-normalization must run the
-server's `normalizeTranscript` (fixups included), not the adapter alone.
+(`json`), gzipped. The first object written for a session, and what every
+trace is made from: the server normalizes the stored part, not the bytes on
+the wire, so the trace can be remade from the bucket alone when adapters
+improve. It is the log as the harness wrote it, before the server's
+per-source fixups, so a re-normalization must run the server's
+`normalizeTranscript` (fixups included), not the adapter alone.
 Part-numbered: the same bytes at the same part are a no-op, different bytes
 replace.
 
@@ -148,10 +162,12 @@ on the pointer and both traces stay listed.
 
 ## Reading
 
-- One session: `metadata.json`, then `trace.<head>.json.gz`.
+- One session: `metadata.json`, then `trace.<head>.json.gz`; no `head` means
+  raw only, nothing to read yet.
 - Everything new since a cursor: list `changes/` with `StartAfter`, fetch what
   the entries point at.
-- A full scan: list `sessions/`, read each `metadata.json`.
+- A full scan: list `sessions/`, read each `metadata.json`, skip those with no
+  `head`.
 
 A reader needs `s3:ListBucket` on the prefix and `s3:GetObject` under it. A
 writer additionally needs `s3:PutObject`; tombstoning needs `s3:DeleteObject`.

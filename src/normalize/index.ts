@@ -1,7 +1,8 @@
 /** Native transcript → redacted trajectory-v1 records. Normalization is `@letta-ai/trajectory`'s
  * job; this module applies the fixups its adapters need (Claude Code's background-task input,
- * Codex's inherited history and subagent reports), runs the adapter, and redacts. String in,
- * records out. */
+ * Codex's inherited history and subagent reports), runs the adapter, and redacts. The one
+ * source it has no adapter for, a Datadog Trajectory session stream, has its own here. String
+ * in, records out. */
 
 import {
   normalizeTranscript as letta,
@@ -13,6 +14,7 @@ import type { NormalizedRecord } from "../schemas/trajectory";
 import { VERSION } from "../version";
 import { markClaudeInputs, markedAsObservations } from "./claude-inputs";
 import { subagentReportsAsObservations, withoutInheritedHistory } from "./codex-rollout";
+import { DATADOG_TRAJECTORY, normalizeDatadogTrajectory } from "./datadog-trajectory";
 
 /** What a stored trace records as its normalizer: this server's release plus the
  * `@letta-ai/trajectory` it ran, as semver build metadata. Either changing can change the
@@ -22,9 +24,8 @@ export const NORMALIZER = {
   version: `${VERSION}+trajectory.${trajectoryPackage.version}`,
 } as const;
 
-/** The transcript formats this server accepts, by their trajectory source name. The name is
- * also the `agent` a client sends and what the archive id is derived from. */
-export const SOURCES = [
+/** The native logs `@letta-ai/trajectory` reads, by their trajectory source name. */
+const LETTA_SOURCES = [
   "claude-code",
   "cursor",
   "codex",
@@ -33,7 +34,14 @@ export const SOURCES = [
   "gemini-cli",
 ] as const satisfies readonly TranscriptTrajectorySource[];
 
+/** The transcript formats this server accepts: the native logs, and a Datadog Trajectory
+ * session stream. The name is also the `agent` a client sends and what the archive id is
+ * derived from. */
+export const SOURCES = [...LETTA_SOURCES, DATADOG_TRAJECTORY] as const;
+
 export type Source = (typeof SOURCES)[number];
+
+type LettaSource = (typeof LETTA_SOURCES)[number];
 
 export function isSource(value: string): value is Source {
   return (SOURCES as readonly string[]).includes(value);
@@ -59,7 +67,7 @@ export class NormalizeError extends Error {
 }
 
 /** The per-source rewrite the adapter needs to see. */
-function prepare(source: Source, transcript: string): string {
+function prepare(source: LettaSource, transcript: string): string {
   switch (source) {
     case "codex":
       return withoutInheritedHistory(transcript);
@@ -67,6 +75,21 @@ function prepare(source: Source, transcript: string): string {
       return markClaudeInputs(transcript);
     default:
       return transcript;
+  }
+}
+
+/** The records of one transcript before redaction: the Datadog stream through its own adapter,
+ * every native log through `@letta-ai/trajectory` with its fixups around it. */
+function recordsOf(source: Source, transcript: string): NormalizedRecord[] {
+  if (source === DATADOG_TRAJECTORY) return normalizeDatadogTrajectory(transcript);
+  const { records } = letta({ source, transcript: prepare(source, transcript) });
+  switch (source) {
+    case "codex":
+      return subagentReportsAsObservations(records);
+    case "claude-code":
+      return markedAsObservations(records);
+    default:
+      return records;
   }
 }
 
@@ -79,15 +102,7 @@ export function normalizeTranscript(input: {
   const { source, transcript } = input;
   if (transcript.trim() === "") return { records: [], empty: true };
   try {
-    const codex = source === "codex";
-    const claude = source === "claude-code";
-    const { records } = letta({ source, transcript: prepare(source, transcript) });
-    const fixed = codex
-      ? subagentReportsAsObservations(records)
-      : claude
-        ? markedAsObservations(records)
-        : records;
-    return { records: redactRecords(fixed) };
+    return { records: redactRecords(recordsOf(source, transcript)) };
   } catch (err) {
     const code = (err as { code?: unknown } | null)?.code;
     if (typeof code === "string" && EMPTY_CONVERSATION_CODES.has(code)) {

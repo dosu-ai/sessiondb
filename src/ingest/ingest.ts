@@ -1,9 +1,10 @@
-/** The write path: normalized, redacted records in, objects in the store out.
+/** The write path: objects in the store out.
  *
- * `ingest`: cap → parse (validate, strip NUL, events, hash) → dedupe on `(owner, content_hash)`
- * → publish trace → swap `metadata.json` → change entry. `putRaw` and `tombstone` are the two
- * sibling operations. Redaction happened in `normalizeTranscript`; the hash is over what it
- * produced. */
+ * `putRaw` comes first: the redacted transcript as the session's raw part, and the session's
+ * `metadata.json` if it is the first. `ingest` follows with what normalizing that transcript
+ * produced: cap → parse (validate, strip NUL, events, hash) → dedupe on `(owner, content_hash)`
+ * → publish trace → swap `metadata.json` → change entry. `tombstone` undoes both. Redaction
+ * happened in `redactRaw` and `normalizeTranscript`; the hash is over what the latter produced. */
 
 import {
   METADATA_SCHEMA,
@@ -192,12 +193,16 @@ export interface PutRawInput {
   format: RawFormat;
   /** Already redacted (`redactRaw`) and gzipped. */
   bytes: Uint8Array;
+  /** Identifies the writer in the layout marker. */
+  client?: string;
   now?: () => Date;
 }
 
 export type PutRawResult = { status: "stored" | "exists"; part: number };
 
-/** Store one raw part beside a session that has a trace. Idempotent for the same bytes. */
+/** Store one raw part. The first thing stored for a session: when there is no `metadata.json`
+ * yet this writes one with the part and no head, and the trace, if the transcript normalizes to
+ * one, is added by `ingest` after. Idempotent for the same bytes. */
 export async function putRaw(input: PutRawInput): Promise<PutRawResult> {
   const { store, owner, part, format } = input;
   if (input.bytes.length > LIMITS.maxRawPartBytes) {
@@ -205,9 +210,12 @@ export async function putRaw(input: PutRawInput): Promise<PutRawResult> {
   }
   if (!Number.isInteger(part) || part < 0) throw new IngestRejected("invalid", "part must be ≥ 0");
   const archive = archiveId(owner, input.agent, input.session_id);
+  const at = (input.now ?? (() => new Date()))().toISOString();
+  await ensureLayout(store, input.client ?? "sessionstorage");
   const existing = await readMetadata(store, owner, archive);
-  if (!existing) throw new IngestRejected("invalid", "no trace stored for this session yet");
-  if (existing.status === "redacted") throw new IngestRejected("redacted", "session was redacted");
+  if (existing?.status === "redacted") {
+    throw new IngestRejected("redacted", "session was redacted");
+  }
 
   const outcome = await publishObject(
     store,
@@ -216,15 +224,29 @@ export async function putRaw(input: PutRawInput): Promise<PutRawResult> {
     "application/gzip",
     "replace",
   );
-  if (outcome === "exists" && existing.raw.some((r) => r.part === part)) {
+  if (existing && outcome === "exists" && existing.raw.some((r) => r.part === part)) {
     return { status: "exists", part };
   }
-  const at = (input.now ?? (() => new Date()))().toISOString();
   const raw = [
-    ...existing.raw.filter((r) => r.part !== part),
+    ...(existing?.raw ?? []).filter((r) => r.part !== part),
     { part, format, size: input.bytes.length, sha256: sha256(input.bytes), created_at: at },
   ].sort((a, b) => a.part - b.part);
-  await swapMetadata(store, { ...existing, raw, raw_format: format, updated_at: at });
+  const next: SessionMetadata = existing
+    ? { ...existing, raw, raw_format: format, updated_at: at }
+    : {
+        schema: METADATA_SCHEMA,
+        owner,
+        archive_id: archive,
+        session_id: input.session_id,
+        agent: input.agent,
+        status: "stored",
+        traces: [],
+        raw,
+        raw_format: format,
+        created_at: at,
+        updated_at: at,
+      };
+  await swapMetadata(store, next);
   return { status: "stored", part };
 }
 

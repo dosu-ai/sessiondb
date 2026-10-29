@@ -2,33 +2,20 @@
  * serves. One bucket, one token list, both from the environment. Each token names a person,
  * and that person's sessions live under `owners/<name>/`: a token writes there and reads only
  * there, so teammates never see each other's transcripts. A client with a token posts raw
- * transcripts; the server normalizes, redacts and writes them to the bucket in the layout, so
- * the laptop never holds a bucket credential and the bucket never holds an unredacted byte. */
+ * transcripts; the server stores them redacted, normalizes them and writes the traces to the
+ * bucket in the layout, so the laptop never holds a bucket credential and the bucket never
+ * holds an unredacted byte. */
 
 import { timingSafeEqual } from "node:crypto";
-import { copiedPrefix, planShipment, prefixSha256 } from "./ingest/continuation";
+import { getSession, getTrace, IngestRejected, listSessions, tombstone } from "./ingest/ingest";
 import {
-  getSession,
-  getTrace,
-  IngestRejected,
-  ingest,
-  listSessions,
-  putRaw,
-  tombstone,
-} from "./ingest/ingest";
-import { LIMITS } from "./ingest/limits";
-import { isTrivialTrajectory } from "./ingest/worthiness";
-import {
-  isSource,
-  NORMALIZER,
-  NormalizeError,
-  normalizeTranscript,
-  SOURCES,
-  type Source,
-} from "./normalize";
-import { redactRaw } from "./redact/raw";
+  SessionRejected,
+  type SessionUpload,
+  type StoreSessionResult,
+  storeSession,
+} from "./ingest/session";
+import { isSource, SOURCES, type Source } from "./normalize";
 import type { RawFormat } from "./schemas/store";
-import type { NormalizedRecord } from "./schemas/trajectory";
 import { readChanges } from "./store/changes";
 import { archiveId, assertOwner, keys } from "./store/layout";
 import { type Store, StoreError } from "./store/store";
@@ -210,40 +197,28 @@ export function createApp(options: AppOptions) {
 
   // --- sessions ---------------------------------------------------------
 
-  /** A recorded branch name, or undefined for the detached (`HEAD`) and empty values agents
-   * record. */
-  function recordedBranch(value: unknown): string | undefined {
-    if (typeof value !== "string") return undefined;
-    const branch = value.trim();
-    return branch && branch !== "HEAD" ? branch : undefined;
-  }
-
-  /** What a fork copied from the session it was made from, when that parent is stored here. */
-  async function forkCopy(
-    owner: string,
-    agent: string,
-    forkOf: string | undefined,
-    records: NormalizedRecord[],
-  ) {
-    if (!forkOf) return undefined;
-    const parent = await getSession(store, owner, agent, forkOf);
-    if (!parent?.head) return undefined;
-    const trace = await getTrace(store, owner, parent.archive_id, parent.head);
-    return copiedPrefix(records, trace?.records ?? null);
+  /** The pipeline (`ingest/session.ts`) as a response: 201 for a new trace, 200 for a duplicate
+   * or a trivial session, 422 for a transcript it refuses. */
+  async function stored(upload: SessionUpload): Promise<Response> {
+    let result: StoreSessionResult;
+    try {
+      result = await storeSession(upload, { store, client, now });
+    } catch (err) {
+      if (err instanceof SessionRejected) throw new HttpError(422, err.code, err.message);
+      if (err instanceof IngestRejected) throw new HttpError(422, err.code, err.message);
+      throw err;
+    }
+    return json(result, result.status === "stored" ? 201 : 200);
   }
 
   route("POST", "/v1/sessions", async ({ request }) => {
     const owner = authorize(request);
     const body = await readJson(request);
-    const agent = str(body, "agent", true) as string;
-    const sessionId = str(body, "session_id", true) as string;
-    const transcript = str(body, "transcript", true) as string;
+    const agent = sourceOf(str(body, "agent", true) as string);
     const format = (str(body, "format") ?? "jsonl") as RawFormat;
     if (format !== "jsonl" && format !== "json") {
       throw new HttpError(400, "bad_field", "format must be jsonl or json");
     }
-    const keepRaw = body.keep_raw === undefined ? true : body.keep_raw === true;
-    const source = sourceOf(agent);
     const shipped = body.shipped as { records?: unknown; prefix_sha256?: unknown } | undefined;
     if (
       shipped !== undefined &&
@@ -254,84 +229,25 @@ export function createApp(options: AppOptions) {
     ) {
       throw new HttpError(400, "bad_field", "shipped needs records and prefix_sha256");
     }
-
-    let records: NormalizedRecord[];
-    try {
-      const outcome = normalizeTranscript({ source, transcript });
-      if (outcome.empty) throw new HttpError(422, "empty", "transcript has no conversation");
-      records = outcome.records;
-    } catch (err) {
-      if (err instanceof HttpError) throw err;
-      if (err instanceof NormalizeError) {
-        throw new HttpError(422, `normalize_${err.code}`, err.message);
-      }
-      throw err;
-    }
-    // What the client stores as its shipped prefix after this call, whatever is written.
-    const whole = {
-      records_total: records.length,
-      prefix_sha256: prefixSha256(records, records.length),
-    };
-
-    // A resumed session: the client says how much shipped before (what it stored from the last
-    // answer); the planner picks the tail, and falls back to the whole session when the prefix
-    // no longer matches. A fork's copy of its parent's history is the parent's to ship.
-    let plan = shipped
-      ? planShipment(records, {
-          records: shipped.records as number,
-          prefix_sha256: shipped.prefix_sha256 as string,
-        })
-      : { records, fresh: records };
-    const copied = await forkCopy(owner, agent, str(body, "fork_of"), records);
-    if (!plan.continuation && copied) plan = planShipment(records, copied);
-    if (isTrivialTrajectory(plan.fresh)) return json({ status: "trivial", ...whole });
-
-    // The branch the transcript recorded as it began, else what the client resolved.
-    const meta = records[0]?.role === "meta" ? records[0] : undefined;
-    const branch = recordedBranch(meta?.git_branch) ?? str(body, "branch");
-
-    try {
-      const result = await ingest({
-        store,
-        owner,
-        records: plan.records,
-        metadata: {
-          session_id: sessionId,
-          agent,
-          project: str(body, "project"),
-          branch,
-          parent_session_id: str(body, "parent_session_id"),
-          ...(plan.continuation ? { continuation: plan.continuation } : {}),
-          normalizer: NORMALIZER,
-        },
-        client,
-        now,
-      });
-      let raw: { status: "stored" | "exists" | "skipped" | "too_large"; part?: number } = {
-        status: "skipped",
-      };
-      if (keepRaw) {
-        const bytes = Bun.gzipSync(new TextEncoder().encode(redactRaw(transcript, format)));
-        if (bytes.length > LIMITS.maxRawPartBytes) {
-          raw = { status: "too_large" };
-        } else {
-          raw = await putRaw({
-            store,
-            owner,
-            agent,
-            session_id: sessionId,
-            part: 0,
-            format,
-            bytes,
-            now,
-          });
-        }
-      }
-      return json({ ...result, ...whole, raw }, result.status === "stored" ? 201 : 200);
-    } catch (err) {
-      if (err instanceof IngestRejected) throw new HttpError(422, err.code, err.message);
-      throw err;
-    }
+    return stored({
+      owner,
+      agent,
+      session_id: str(body, "session_id", true) as string,
+      transcript: str(body, "transcript", true) as string,
+      format,
+      project: str(body, "project"),
+      branch: str(body, "branch"),
+      parent_session_id: str(body, "parent_session_id"),
+      fork_of: str(body, "fork_of"),
+      ...(shipped
+        ? {
+            shipped: {
+              records: shipped.records as number,
+              prefix_sha256: shipped.prefix_sha256 as string,
+            },
+          }
+        : {}),
+    });
   });
 
   route("GET", "/v1/sessions", async ({ request, url }) => {
@@ -361,8 +277,11 @@ export function createApp(options: AppOptions) {
     const sessionId = decodeURIComponent(params.session_id as string);
     const metadata = await getSession(store, owner, agent, sessionId);
     if (!metadata) throw new HttpError(404, "not_found", "no such session");
+    if (metadata.status === "redacted") {
+      throw new HttpError(410, "redacted", "session was redacted; no trace");
+    }
     const hash = url.searchParams.get("hash") ?? metadata.head;
-    if (!hash) throw new HttpError(410, "redacted", "session was redacted; no trace");
+    if (!hash) throw new HttpError(404, "no_trace", "session is stored raw only; no trace yet");
     const trace = await getTrace(store, owner, archiveId(owner, agent, sessionId), hash);
     if (!trace) throw new HttpError(404, "not_found", "no such trace");
     return json(trace);

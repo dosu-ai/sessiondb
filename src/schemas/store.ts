@@ -1,8 +1,10 @@
 /** The two mutable objects in the store and the one append-only one. See `docs/layout.md`.
  *
- * `metadata.json` is the live pointer for one session: which trace is its head, which traces it
- * has had, what raw parts were kept, and whether it has been redacted. `changes/<key>.json` is one
- * entry per publish or tombstone, what a reader tails. */
+ * `metadata.json` is the live pointer for one session: what raw parts it has, which trace is its
+ * head, which traces it has had, and whether it has been redacted. The raw comes first: a session
+ * exists from the moment its transcript is stored, and gets a head when the transcript
+ * normalizes to something worth a trace. `changes/<key>.json` is one entry per publish or
+ * tombstone, what a reader tails. */
 
 export const METADATA_SCHEMA = "sessionstorage/metadata/1" as const;
 export const CHANGE_SCHEMA = "sessionstorage/change/1" as const;
@@ -36,12 +38,14 @@ export interface SessionMetadata {
   archive_id: string;
   session_id: string;
   agent: string;
-  source: string;
+  /** What the trace's meta record says it came from (`datadog-trajectory:claude-code`); absent
+   * until a trace is stored. */
+  source?: string;
   project?: string;
   branch?: string;
   parent_session_id?: string;
   status: SessionStatus;
-  /** The current trace; absent once redacted. */
+  /** The current trace; absent before one is stored (raw only) and once redacted. */
   head?: string;
   traces: SessionTraceRef[];
   raw: RawPart[];
