@@ -140,10 +140,6 @@ describe("auth", () => {
     expect((await call("DELETE", "/v1/sessions/claude-code/mine", other)).status).toBe(404);
     expect(await (await call("GET", "/v1/sessions", other)).json()).toMatchObject({ sessions: [] });
     expect(await (await call("GET", "/v1/changes", other)).json()).toMatchObject({ entries: [] });
-    const archive = archiveId("acme", "claude-code", "mine");
-    expect((await call("GET", `/v1/objects/${keys.metadata("acme", archive)}`, other)).status).toBe(
-      403,
-    );
     // And acme still has it: globex's 404s touched nothing.
     expect((await call("GET", "/v1/sessions/claude-code/mine", { token: TOKEN })).status).toBe(200);
   });
@@ -636,41 +632,6 @@ describe("sessions", () => {
     });
     expect(retry.status).toBe(422);
     expect((await retry.json()).error.code).toBe("redacted");
-  });
-
-  it("serves the owner's own objects read-only over HTTP", async () => {
-    const token = TOKEN;
-    await call("POST", "/v1/sessions", {
-      token,
-      body: { agent: "claude-code", session_id: "sess5", transcript: CLAUDE },
-    });
-    const archive = archiveId("acme", "claude-code", "sess5");
-
-    const list = await call(
-      "GET",
-      `/v1/objects?prefix=${encodeURIComponent(keys.sessions("acme"))}`,
-      {
-        token,
-      },
-    );
-    expect(list.status).toBe(200);
-    const page = (await list.json()) as { keys: string[]; truncated: boolean };
-    expect(page.keys).toContain(keys.metadata("acme", archive));
-
-    const get = await call("GET", `/v1/objects/${keys.metadata("acme", archive)}`, { token });
-    expect(get.status).toBe(200);
-    expect(get.headers.get("content-type")).toBe("application/octet-stream");
-    expect(JSON.parse(await get.text())).toMatchObject({ session_id: "sess5" });
-
-    const head = await call("HEAD", `/v1/objects/${keys.metadata("acme", archive)}`, { token });
-    expect(head.status).toBe(200);
-    expect(Number(head.headers.get("content-length"))).toBeGreaterThan(0);
-    expect((await call("HEAD", "/v1/objects/owners/acme/nope", { token })).status).toBe(404);
-
-    // Another owner's keys, and the layout marker, are off limits.
-    expect((await call("GET", "/v1/objects/owners/globex/sessions/x", { token })).status).toBe(403);
-    expect((await call("GET", "/v1/objects/sessionstorage.json", { token })).status).toBe(403);
-    expect((await call("GET", "/v1/objects?prefix=owners/", { token })).status).toBe(403);
   });
 
   it("calls a greeting-sized session trivial: raw stored, no trace, no change entry", async () => {

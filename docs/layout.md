@@ -147,8 +147,7 @@ per chunk, each saying where it sits in the log (`offset`, `length`: the
 log's bytes before redaction, which can shorten what is stored), and the
 parts in `offset` order, concatenated, are the log. The same bytes at the
 same part are a no-op, different bytes replace; a whole upload removes every
-other part. `offset` and `length` are absent on parts stored before chunks
-were, and such a session takes a whole upload before it can take a chunk.
+other part.
 
 ### `changes/<stamp>-<hash|tombstone>.json` — `sessionstorage/change/1`
 

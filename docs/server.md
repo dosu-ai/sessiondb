@@ -59,7 +59,7 @@ long as clients send `Content-Encoding: gzip`, which every route accepts.
 ### Who sees what
 
 A token is bound to one name and the server scopes every call to `owners/<name>/`: the
-session list, reads, deletes, the change log and raw object reads. Two people on one server
+session list, reads, deletes and the change log. Two people on one server
 never see each other's transcripts; a token leaked from one laptop exposes one person's
 sessions. A reader with its own bucket key sees every folder. That is the point: the team's
 archive is the whole bucket, a person's view is their own folder.
@@ -93,8 +93,6 @@ Request bodies may be `Content-Encoding: gzip`. Every route but `/healthz` wants
 | `GET /v1/sessions/:agent/:session_id/trace?hash` | The head trace (or a specific one); `404 no_trace` while raw only, `410` once redacted |
 | `DELETE /v1/sessions/:agent/:session_id` | Tombstone: drop trace and raw objects, append a tombstone change. Irreversible; a later upload of the same session is refused |
 | `GET /v1/changes?after&since&limit` | The change feed |
-| `GET /v1/objects?prefix&after&limit` | List keys under `owners/<owner>/` |
-| `GET /v1/objects/<key>` · `HEAD` | Read one object / its size and ETag. Read-only; writes go through `/v1/sessions` |
 
 ### `POST /v1/sessions`
 

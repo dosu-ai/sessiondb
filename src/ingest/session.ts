@@ -72,9 +72,8 @@ export interface SessionOptions {
 interface Whole {
   records_total: number;
   prefix_sha256: string;
-  /** Bytes of the log normalized so far; absent for a session stored before parts recorded
-   * where they sit, which takes a whole upload before it can take a chunk. */
-  bytes_total?: number;
+  /** Bytes of the log normalized so far: where the next chunk starts. */
+  bytes_total: number;
 }
 
 type NormalizeStoredResult =
@@ -173,18 +172,15 @@ async function readPart(
   return new TextDecoder().decode(gunzipSync(bytes));
 }
 
-/** The parts in log order: by where they sit, else by number. */
+/** The parts in log order: by where they sit. */
 function inLogOrder(parts: readonly RawPart[]): RawPart[] {
-  return [...parts].sort((a, b) => (a.offset ?? a.part) - (b.offset ?? b.part) || a.part - b.part);
+  return [...parts].sort((a, b) => a.offset - b.offset || a.part - b.part);
 }
 
-/** Where the log ends after `parts`, when every part says where it sits. */
-function logEnd(parts: readonly RawPart[]): number | undefined {
-  const last = parts.at(-1);
-  if (!last || parts.some((p) => p.offset === undefined || p.length === undefined)) {
-    return undefined;
-  }
-  return (last.offset as number) + (last.length as number);
+/** Where the log ends after `parts`. */
+function logEnd(parts: readonly RawPart[]): number {
+  const last = parts.at(-1) as RawPart;
+  return last.offset + last.length;
 }
 
 /** The second step on its own: the stored raw to a trace. */
@@ -205,7 +201,6 @@ async function normalizeStored(
   }
   const continues =
     stored !== undefined &&
-    stored.offset !== undefined &&
     stored.offset > 0 &&
     metadata.head !== undefined &&
     metadata.normalized !== undefined &&
@@ -232,19 +227,16 @@ async function wholeStored(
   const records = normalize({ source: agent, transcript });
   const hash = PrefixHash.of(records);
   const bytes = logEnd(parts);
-  const normalized: NormalizedState | undefined =
-    bytes === undefined
-      ? undefined
-      : {
-          bytes,
-          records: records.length,
-          prefix_sha256: hash.digest(),
-          hash_state: hash.export(),
-        };
+  const normalized: NormalizedState = {
+    bytes,
+    records: records.length,
+    prefix_sha256: hash.digest(),
+    hash_state: hash.export(),
+  };
   const whole: Whole = {
     records_total: records.length,
     prefix_sha256: hash.digest(),
-    ...(bytes === undefined ? {} : { bytes_total: bytes }),
+    bytes_total: bytes,
   };
 
   // A resumed session: the client says how much shipped before (what it stored from the last
@@ -254,8 +246,7 @@ async function wholeStored(
   const copied = await forkCopy(store, owner, agent, input.fork_of, records);
   if (!plan.continuation && copied) plan = planShipment(records, copied);
   if (isTrivialTrajectory(plan.fresh)) {
-    if (normalized)
-      await recordNormalized({ store, owner, agent, session_id: sessionId, normalized, now });
+    await recordNormalized({ store, owner, agent, session_id: sessionId, normalized, now });
     return { status: "trivial", ...whole };
   }
 
@@ -293,8 +284,8 @@ async function continueStored(
   const { store, client, now } = options;
   const { owner, agent, session_id: sessionId } = input;
   const state = metadata.normalized as NormalizedState;
-  const offset = stored.offset as number;
-  const bytes = offset + (stored.length as number);
+  const offset = stored.offset;
+  const bytes = offset + stored.length;
 
   const transcript = await readPart(store, owner, metadata.archive_id, stored);
   const records = normalize({

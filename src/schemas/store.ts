@@ -24,9 +24,9 @@ export interface RawPart {
   created_at: string;
   /** Where the part sits in the log it was cut from: the byte offset of its first byte, and
    * how many of the log's bytes it covers (before redaction, which can shorten it). Part 0 of a
-   * whole upload starts at 0. Absent on parts stored before chunks were. */
-  offset?: number;
-  length?: number;
+   * whole upload starts at 0. */
+  offset: number;
+  length: number;
 }
 
 /** How far a session's log has been normalized: the state the next chunk continues from. */
