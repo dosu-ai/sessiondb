@@ -1,0 +1,36 @@
+{
+  "rejected": false,
+  "content_hash": "24aacb498e57b2eb6af53eb58a407b6ac453b2595041ebd808c9b9b4335c01b3",
+  "source": "datadog-trajectory:claude-code",
+  "started_at": "2026-09-01T00:00:00.000Z",
+  "ended_at": "2026-09-01T00:00:07.000Z",
+  "metadata": {
+    "cwd": "/repo/app",
+    "model": "claude-x"
+  },
+  "events": [
+    {
+      "index": 0,
+      "role": "user",
+      "text": "How does auth work? password: \"[redacted:credential]\"",
+      "timestamp": "2026-09-01T00:00:00.000Z"
+    },
+    {
+      "index": 1,
+      "role": "tool_call",
+      "text": "Read {}",
+      "timestamp": "2026-09-01T00:00:07.000Z",
+      "tool_name": "Read",
+      "tool_call_id": "toolu_01AbCdEfGhJkLmNpQr"
+    },
+    {
+      "index": 2,
+      "role": "tool_result",
+      "text": "export const KEY = 1;\n",
+      "timestamp": "2026-09-01T00:00:07.000Z",
+      "tool_call_id": "toolu_01AbCdEfGhJkLmNpQr",
+      "tool_name": "Read",
+      "ok": true
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+[
+  {
+    "role": "meta",
+    "source": "datadog-trajectory:claude-code",
+    "cwd": "/repo/app",
+    "model": "claude-x"
+  },
+  {
+    "role": "user",
+    "content": "How does auth work? password: \"[redacted:credential]\"",
+    "timestamp": "2026-09-01T00:00:00.000Z"
+  },
+  {
+    "role": "assistant",
+    "content": null,
+    "tool_calls": [
+      {
+        "id": "toolu_01AbCdEfGhJkLmNpQr",
+        "name": "Read",
+        "args": "{}"
+      }
+    ],
+    "timestamp": "2026-09-01T00:00:07.000Z"
+  },
+  {
+    "role": "tool",
+    "tool_call_id": "toolu_01AbCdEfGhJkLmNpQr",
+    "content": "export const KEY = 1;  \r\n",
+    "timestamp": "2026-09-01T00:00:07.000Z",
+    "ok": true
+  }
+]
