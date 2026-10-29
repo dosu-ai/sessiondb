@@ -22,6 +22,25 @@ export interface RawPart {
   size: number;
   sha256: string;
   created_at: string;
+  /** Where the part sits in the log it was cut from: the byte offset of its first byte, and
+   * how many of the log's bytes it covers (before redaction, which can shorten it). Part 0 of a
+   * whole upload starts at 0. Absent on parts stored before chunks were. */
+  offset?: number;
+  length?: number;
+}
+
+/** How far a session's log has been normalized: the state the next chunk continues from. */
+export interface NormalizedState {
+  /** Bytes of the log normalized so far, up to its last complete line: where the next chunk
+   * starts. */
+  bytes: number;
+  /** How many records the whole session normalizes to, those bytes in. */
+  records: number;
+  /** `prefixSha256` of those records. */
+  prefix_sha256: string;
+  /** The hash mid-stream after those records (`PrefixHash.export()`), so the next chunk's
+   * records extend it. */
+  hash_state: string;
 }
 
 export interface SessionTraceRef {
@@ -50,6 +69,8 @@ export interface SessionMetadata {
   traces: SessionTraceRef[];
   raw: RawPart[];
   raw_format?: RawFormat;
+  /** Where a chunked upload stands; absent until the session's first chunk is normalized. */
+  normalized?: NormalizedState;
   created_at: string;
   updated_at: string;
 }

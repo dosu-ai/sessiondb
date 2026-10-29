@@ -141,14 +141,26 @@ function typedByHuman(event: Event): boolean {
   return actor === undefined || actor === "human";
 }
 
+export interface DatadogNormalizeOptions {
+  /** The transcript is a chunk of a stream past its `session_start`: no meta record is made,
+   * no conversation is demanded of it, and a tool result whose call is not in the chunk
+   * answers a call shipped in an earlier one (unless the event is backfilled, which never had
+   * one). */
+  partial?: boolean;
+}
+
 /** The records of one stream, meta first. Throws `DatadogTrajectoryError` when the stream has
- * no `session_start`, or holds no conversation (no prompt, or nothing answering one). */
-export function normalizeDatadogTrajectory(transcript: string): NormalizedRecord[] {
+ * no `session_start`, or holds no conversation (no prompt, or nothing answering one). A partial
+ * stream's records are those of its events alone. */
+export function normalizeDatadogTrajectory(
+  transcript: string,
+  options: DatadogNormalizeOptions = {},
+): NormalizedRecord[] {
   const events = parseEvents(transcript);
-  const start = sessionStart(events);
-  const records: NormalizedRecord[] = [metaOf(start)];
+  const start = options.partial ? undefined : sessionStart(events);
+  const records: NormalizedRecord[] = start ? [metaOf(start)] : [];
   // An event without a timestamp takes the last one seen, so order is kept.
-  let last = present(start.timestamp) ?? present(start.started_at) ?? "";
+  let last = present(start?.timestamp) ?? present(start?.started_at) ?? "";
   let asked = false;
   let answered = false;
   /** Tool calls seen as `phase: pre`, so a result can tell whether its call was shipped. */
@@ -192,9 +204,11 @@ export function normalizeDatadogTrajectory(transcript: string): NormalizedRecord
           called.add(id);
           records.push(call);
         } else if (event.phase === "post") {
-          if (!called.has(id)) {
-            // A result whose call never shipped: the call is what the result's own event says
-            // it was, with whatever input the event kept.
+          // A result whose call is not in the stream: in a backfilled session there never was
+          // one, so the call is what the result's own event says it was, with whatever input
+          // the event kept. In a chunk of a live session, the call was in an earlier chunk.
+          const orphan = !options.partial || event._backfilled === true;
+          if (!called.has(id) && orphan) {
             const call = toolCall(event, id, timestamp);
             if (call === null) break;
             answered = true;
@@ -231,6 +245,7 @@ export function normalizeDatadogTrajectory(transcript: string): NormalizedRecord
     }
   }
 
+  if (options.partial) return records;
   if (!asked) {
     throw new DatadogTrajectoryError("missing_user_records", "stream has no user prompt");
   }

@@ -121,7 +121,7 @@ if (scanInterval > 0) {
     owners,
     client,
     onFile: (r) => {
-      if (r.outcome === "live" || r.outcome === "duplicate") return;
+      if (r.outcome === "duplicate") return;
       console.log(`[sessiondb] scan ${r.outcome} ${r.key}${r.detail ? ` (${r.detail})` : ""}`);
     },
   });
@@ -133,7 +133,7 @@ if (scanInterval > 0) {
       const s = await scanner.scan();
       if (s.read > 0) {
         console.log(
-          `[sessiondb] scan: ${s.read} read, ${s.stored} stored, ${s.duplicate} duplicate, ${s.trivial} trivial, ${s.live} live, ${s.rejected} rejected`,
+          `[sessiondb] scan: ${s.read} read, ${s.stored} stored, ${s.duplicate} duplicate, ${s.trivial} trivial, ${s.rejected} rejected`,
         );
       }
     } catch (err) {

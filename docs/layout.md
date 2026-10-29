@@ -109,8 +109,18 @@ empty `traces`, and no `head` or `source`, and never appears in `changes/`.
     { "content_hash": "…", "created_at": "…", "records": 5,
       "continuation": { "from_record": 6, "prefix_sha256": "…" } }
   ],
-  "raw": [ { "part": 0, "format": "jsonl", "size": 1234, "sha256": "…", "created_at": "…" } ],
+  "raw": [
+    { "part": 0, "format": "jsonl", "size": 1234, "sha256": "…", "created_at": "…",
+      "offset": 0, "length": 48213 },           // where the part sits in the log
+    { "part": 1, "format": "jsonl", "size": 300, "sha256": "…", "created_at": "…",
+      "offset": 48213, "length": 9120 }
+  ],
   "raw_format": "jsonl",
+  "normalized": {                    // the chunk state: absent until a part was normalized
+    "bytes": 57333,                  // of the log normalized so far: where the next chunk starts
+    "records": 15, "prefix_sha256": "…",   // the whole session's, so far
+    "hash_state": "…"                // the prefix hash mid-stream, for the next chunk to extend
+  },
   "created_at": "…", "updated_at": "…"
 }
 ```
@@ -118,19 +128,26 @@ empty `traces`, and no `head` or `source`, and never appears in `changes/`.
 A session that grew after it was stored gets a second trace with a
 `continuation`: the tail's records, hashed on their own, plus where in the
 full session they start and a hash of what came before. A reader that wants
-the whole session concatenates in `traces` order.
+the whole session concatenates in `traces` order. Whether the growth came as
+a whole upload with `shipped` or as a chunk, the trace is the same.
 
 ### `raw.<n>.<format>.gz`
 
 The native transcript, redacted line by line (`jsonl`) or as a document
 (`json`), gzipped. The first object written for a session, and what every
-trace is made from: the server normalizes the stored part, not the bytes on
+trace is made from: the server normalizes the stored parts, not the bytes on
 the wire, so the trace can be remade from the bucket alone when adapters
 improve. It is the log as the harness wrote it, before the server's
 per-source fixups, so a re-normalization must run the server's
 `normalizeTranscript` (fixups included), not the adapter alone.
-Part-numbered: the same bytes at the same part are a no-op, different bytes
-replace.
+
+A whole upload is part 0 and the only part; a log sent in chunks has one part
+per chunk, each saying where it sits in the log (`offset`, `length`: the
+log's bytes before redaction, which can shorten what is stored), and the
+parts in `offset` order, concatenated, are the log. The same bytes at the
+same part are a no-op, different bytes replace; a whole upload removes every
+other part. `offset` and `length` are absent on parts stored before chunks
+were, and such a session takes a whole upload before it can take a chunk.
 
 ### `changes/<stamp>-<hash|tombstone>.json` — `sessionstorage/change/1`
 

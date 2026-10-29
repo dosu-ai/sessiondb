@@ -23,7 +23,7 @@ interface Continuation {
 }
 
 /** JSON with object keys sorted at every level, so equal records always hash equally. */
-function canonicalJson(value: unknown): string {
+export function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
   if (typeof value === "object" && value !== null) {
     const entries = Object.entries(value)

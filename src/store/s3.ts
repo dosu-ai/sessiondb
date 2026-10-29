@@ -4,6 +4,7 @@
  * `endpoint`. Requires the Bun runtime. */
 
 import {
+  type GetOptions,
   type ListOptions,
   type ListResult,
   ObjectExistsError,
@@ -90,11 +91,18 @@ export class S3Store implements Store {
     return this.prefix ? `${this.prefix}/${key}` : key;
   }
 
-  async get(key: string): Promise<Uint8Array | null> {
+  async get(key: string, options: GetOptions = {}): Promise<Uint8Array | null> {
+    const { range } = options;
     try {
       const file = this.client.file(this.keyOf(key));
       if (!(await file.exists())) return null;
-      return new Uint8Array(await file.arrayBuffer());
+      if (!range) return new Uint8Array(await file.arrayBuffer());
+      // A `Range` past the end is a 416 on S3; what fits is read instead.
+      const size = (await file.stat()).size;
+      const start = Math.min(range.start, size);
+      const end = Math.min(range.end ?? size, size);
+      if (end <= start) return new Uint8Array(0);
+      return new Uint8Array(await file.slice(start, end).arrayBuffer());
     } catch (err) {
       if (isNotFound(err)) return null;
       throw new StoreError(`read ${key}`, err);

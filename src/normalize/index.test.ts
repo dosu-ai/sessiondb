@@ -164,3 +164,86 @@ describe("isSource", () => {
     expect(isSource("emacs")).toBe(false);
   });
 });
+
+describe("normalizeTranscript in chunks", () => {
+  const LOGS: [string, "claude-code" | "codex" | "datadog-trajectory"][] = [
+    ["claude-basic.claude-code.jsonl", "claude-code"],
+    ["claude-queued-input.claude-code.jsonl", "claude-code"],
+    ["claude-task-notification.claude-code.jsonl", "claude-code"],
+    ["codex-subagent-report.codex.jsonl", "codex"],
+    ["codex-forked-subagent.codex.jsonl", "codex"],
+    ["datadog-claude-session.datadog-trajectory.jsonl", "datadog-trajectory"],
+    ["datadog-backfilled-session.datadog-trajectory.jsonl", "datadog-trajectory"],
+  ];
+  const sessionOf = (source: string, log: string): string => {
+    const first = JSON.parse(log.slice(0, log.indexOf("\n"))) as Record<string, unknown>;
+    if (source === "codex") return (first.payload as Record<string, string>).id;
+    return (first.sessionId ?? first.session_id) as string;
+  };
+
+  it.each(LOGS)(
+    "%s: cut at any line, the head whole and the tail as a chunk normalize to what the whole does",
+    (name, source) => {
+      // One more turn of the subagent's own on the forked rollout, so a cut past its inherited
+      // history and first turn exists.
+      const log =
+        read(name) +
+        (name.startsWith("codex-forked")
+          ? `${JSON.stringify({
+              timestamp: "2026-10-02T10:00:01.000Z",
+              ordinal: 6,
+              type: "response_item",
+              payload: {
+                type: "message",
+                role: "assistant",
+                content: [{ type: "output_text", text: "Then ran them." }],
+              },
+            })}\n`
+          : "");
+      const whole = normalizeTranscript({ source, transcript: log });
+      expect(whole.empty).toBeFalsy();
+      const session_id = sessionOf(source, log);
+      const lines = log.split("\n");
+      let cuts = 0;
+      for (let i = 1; i < lines.length - 1; i++) {
+        const head = `${lines.slice(0, i).join("\n")}\n`;
+        const tail = lines.slice(i).join("\n");
+        const rest = normalizeTranscript({
+          source,
+          transcript: tail,
+          chunk: { offset: Buffer.byteLength(head), session_id },
+        });
+        // A chunk carries no meta record of its own.
+        expect(rest.records.some((r) => r.role === "meta")).toBe(false);
+
+        // The head as the whole log so far (the session's first upload), the tail as a chunk.
+        const first = normalizeTranscript({ source, transcript: head });
+        if (!first.empty) {
+          expect([...first.records, ...rest.records]).toEqual(whole.records);
+          cuts++;
+        }
+      }
+      expect(cuts).toBeGreaterThan(0);
+    },
+  );
+
+  it("is empty for a chunk with no records in it, not for one with any", () => {
+    const noise = '{"type":"progress","uuid":"p","sessionId":"s","data":{}}\n';
+    expect(
+      normalizeTranscript({
+        source: "claude-code",
+        transcript: noise,
+        chunk: { offset: 10, session_id: "s" },
+      }),
+    ).toEqual({ records: [], empty: true });
+    const log = read("claude-basic.claude-code.jsonl");
+    const last = log.trimEnd().split("\n").at(-1) as string;
+    const chunk = normalizeTranscript({
+      source: "claude-code",
+      transcript: `${last}\n`,
+      chunk: { offset: Buffer.byteLength(log) - Buffer.byteLength(last) - 1, session_id: "sess1" },
+    });
+    expect(chunk.empty).toBeFalsy();
+    expect(chunk.records).toHaveLength(1);
+  });
+});

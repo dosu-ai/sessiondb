@@ -2,10 +2,19 @@
  * job; this module applies the fixups its adapters need (Claude Code's background-task input,
  * Codex's inherited history and subagent reports), runs the adapter, and redacts. The one
  * source it has no adapter for, a Datadog Trajectory session stream, has its own here. String
- * in, records out. */
+ * in, records out.
+ *
+ * A transcript can come in whole or as a chunk: the bytes of a log past a point already
+ * normalized. A chunk is normalized on its own and yields the records those lines stand for,
+ * without the meta record (the session's meta was made from its first chunk) and without the
+ * demand that it hold a conversation. The Letta adapters do this through their canonical API
+ * (`partial` source context), whose records are the same trajectory-v1 records; the Datadog
+ * adapter has its own partial mode. Cut at a line boundary, a log's chunks normalize to exactly
+ * the records the whole log does, in order. */
 
 import {
   normalizeTranscript as letta,
+  normalizeToCanonical as lettaCanonical,
   type TranscriptTrajectorySource,
 } from "@letta-ai/trajectory";
 import trajectoryPackage from "@letta-ai/trajectory/package.json";
@@ -66,7 +75,19 @@ export class NormalizeError extends Error {
   }
 }
 
-/** The per-source rewrite the adapter needs to see. */
+/** Where a chunk sits in its log. */
+export interface Chunk {
+  /** The byte offset of the chunk's first byte in the log. */
+  offset: number;
+  /** The session the log is of, for an adapter whose chunks do not say (a Codex rollout's
+   * `session_meta` is in its first chunk only). */
+  session_id: string;
+}
+
+/** The per-source rewrite the adapter needs to see. The inherited history a forked Codex
+ * rollout starts with is cut by what its `session_meta` says; a chunk past the rollout's head
+ * never holds any of it, since a session has a head only once the subagent's own records,
+ * which come after, were stored. */
 function prepare(source: LettaSource, transcript: string): string {
   switch (source) {
     case "codex":
@@ -78,11 +99,38 @@ function prepare(source: LettaSource, transcript: string): string {
   }
 }
 
+/** The adapter's records for a chunk: its canonical records' `record_json`, which is the
+ * trajectory-v1 record each stands for, less the meta record it emits for a chunk at offset
+ * 0 (a chunk's records are never the session's meta). The session id is declared only when
+ * the adapter asks for it, since one that reads its own id refuses a declared one that
+ * differs. */
+function lettaChunk(source: LettaSource, transcript: string, chunk: Chunk): NormalizedRecord[] {
+  const run = (groupId?: string) =>
+    lettaCanonical({
+      source,
+      transcript,
+      sourceContext: { baseByteOffset: chunk.offset, partial: true, groupId },
+    })
+      .records.filter((record) => record.record_type !== "meta")
+      .map((record) => JSON.parse(record.record_json) as NormalizedRecord);
+  try {
+    return run();
+  } catch (err) {
+    if ((err as { code?: unknown } | null)?.code !== "source_group_required") throw err;
+    return run(chunk.session_id);
+  }
+}
+
 /** The records of one transcript before redaction: the Datadog stream through its own adapter,
  * every native log through `@letta-ai/trajectory` with its fixups around it. */
-function recordsOf(source: Source, transcript: string): NormalizedRecord[] {
-  if (source === DATADOG_TRAJECTORY) return normalizeDatadogTrajectory(transcript);
-  const { records } = letta({ source, transcript: prepare(source, transcript) });
+function recordsOf(source: Source, transcript: string, chunk?: Chunk): NormalizedRecord[] {
+  if (source === DATADOG_TRAJECTORY) {
+    return normalizeDatadogTrajectory(transcript, { partial: chunk !== undefined });
+  }
+  const prepared = prepare(source, transcript);
+  const records = chunk
+    ? lettaChunk(source, prepared, chunk)
+    : letta({ source, transcript: prepared }).records;
   switch (source) {
     case "codex":
       return subagentReportsAsObservations(records);
@@ -94,15 +142,20 @@ function recordsOf(source: Source, transcript: string): NormalizedRecord[] {
 }
 
 /** Normalize one transcript to redacted trajectory-v1 records. `empty` for a transcript the
- * adapter reads but finds no conversation in; throws `NormalizeError` for one it cannot read. */
+ * adapter reads but finds no conversation in; throws `NormalizeError` for one it cannot read.
+ * With `chunk`, the transcript is a chunk of a log and the records are the chunk's own: no meta
+ * record, and `empty` only when it holds no records at all. */
 export function normalizeTranscript(input: {
   source: Source;
   transcript: string;
+  chunk?: Chunk;
 }): NormalizeOutcome {
-  const { source, transcript } = input;
+  const { source, transcript, chunk } = input;
   if (transcript.trim() === "") return { records: [], empty: true };
   try {
-    return { records: redactRecords(recordsOf(source, transcript)) };
+    const records = redactRecords(recordsOf(source, transcript, chunk));
+    if (chunk && records.length === 0) return { records: [], empty: true };
+    return { records };
   } catch (err) {
     const code = (err as { code?: unknown } | null)?.code;
     if (typeof code === "string" && EMPTY_CONVERSATION_CODES.has(code)) {

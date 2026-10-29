@@ -107,8 +107,14 @@ describe("normalizeDatadogTrajectory", () => {
 
   it("splits an agent message into its reasoning and its answer", () => {
     const records = normalizeDatadogTrajectory(STREAM);
-    expect(records[6]).toMatchObject({ role: "reasoning", content: /KEY constant/ });
-    expect(records[7]).toMatchObject({ role: "assistant", content: /Auth reads KEY/ });
+    expect(records[6]).toMatchObject({
+      role: "reasoning",
+      content: expect.stringMatching(/KEY constant/),
+    });
+    expect(records[7]).toMatchObject({
+      role: "assistant",
+      content: expect.stringMatching(/Auth reads KEY/),
+    });
   });
 
   it("files input nobody typed as an observation", () => {

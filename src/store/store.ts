@@ -28,10 +28,16 @@ export interface ListResult {
   truncated: boolean;
 }
 
+export interface GetOptions {
+  /** Read only `[start, end)` of the object, as an HTTP `Range`. An `end` past the object reads
+   * to its end; a `start` at or past it reads nothing. */
+  range?: { start: number; end?: number };
+}
+
 export interface Store {
   /** `file:///…`, `s3://bucket/prefix`, `r2://bucket/prefix`. */
   readonly url: string;
-  get(key: string): Promise<Uint8Array | null>;
+  get(key: string, options?: GetOptions): Promise<Uint8Array | null>;
   put(key: string, body: Uint8Array, options?: PutOptions): Promise<void>;
   stat(key: string): Promise<ObjectStat | null>;
   delete(key: string): Promise<void>;

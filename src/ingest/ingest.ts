@@ -8,6 +8,7 @@
 
 import {
   METADATA_SCHEMA,
+  type NormalizedState,
   type RawFormat,
   type SessionMetadata,
   type SessionTraceRef,
@@ -51,6 +52,8 @@ export interface IngestInput {
   /** Identifies the writer in the layout marker (`sessiondb-server/0.1.0`). */
   client?: string;
   now?: () => Date;
+  /** Where the session's log stands once these records are in, written with the pointer. */
+  normalized?: NormalizedState;
 }
 
 export interface IngestResult {
@@ -153,6 +156,8 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
   const parent = metadata.parent_session_id ?? existing?.parent_session_id;
   if (parent) next.parent_session_id = parent;
   if (existing?.raw_format) next.raw_format = existing.raw_format;
+  const normalized = input.normalized ?? existing?.normalized;
+  if (normalized) next.normalized = normalized;
 
   // A duplicate is one the pointer already lists and whose object was there: nothing new to say.
   // An object that exists without a pointer entry (an interrupted earlier publish) is completed
@@ -193,6 +198,13 @@ export interface PutRawInput {
   format: RawFormat;
   /** Already redacted (`redactRaw`) and gzipped. */
   bytes: Uint8Array;
+  /** Where the part sits in the log: its first byte's offset, and the log bytes it covers
+   * before redaction. */
+  offset: number;
+  length: number;
+  /** The part is the whole log: every other part stored is of an earlier version of it and is
+   * removed. */
+  whole?: boolean;
   /** Identifies the writer in the layout marker. */
   client?: string;
   now?: () => Date;
@@ -204,7 +216,7 @@ export type PutRawResult = { status: "stored" | "exists"; part: number };
  * yet this writes one with the part and no head, and the trace, if the transcript normalizes to
  * one, is added by `ingest` after. Idempotent for the same bytes. */
 export async function putRaw(input: PutRawInput): Promise<PutRawResult> {
-  const { store, owner, part, format } = input;
+  const { store, owner, part, format, offset, length } = input;
   if (input.bytes.length > LIMITS.maxRawPartBytes) {
     throw new IngestRejected("too_large", `raw part exceeds ${LIMITS.maxRawPartBytes} bytes`);
   }
@@ -224,12 +236,24 @@ export async function putRaw(input: PutRawInput): Promise<PutRawResult> {
     "application/gzip",
     "replace",
   );
-  if (existing && outcome === "exists" && existing.raw.some((r) => r.part === part)) {
-    return { status: "exists", part };
+  const others = (existing?.raw ?? []).filter((r) => r.part !== part);
+  const stale = input.whole ? others : [];
+  const same = existing?.raw.find((r) => r.part === part);
+  if (same && outcome === "exists" && same.offset === offset && same.length === length) {
+    if (stale.length === 0) return { status: "exists", part };
   }
+  for (const r of stale) await store.delete(keys.raw(owner, archive, r.part, r.format));
   const raw = [
-    ...(existing?.raw ?? []).filter((r) => r.part !== part),
-    { part, format, size: input.bytes.length, sha256: sha256(input.bytes), created_at: at },
+    ...(input.whole ? [] : others),
+    {
+      part,
+      format,
+      size: input.bytes.length,
+      sha256: sha256(input.bytes),
+      created_at: at,
+      offset,
+      length,
+    },
   ].sort((a, b) => a.part - b.part);
   const next: SessionMetadata = existing
     ? { ...existing, raw, raw_format: format, updated_at: at }
@@ -246,8 +270,28 @@ export async function putRaw(input: PutRawInput): Promise<PutRawResult> {
         created_at: at,
         updated_at: at,
       };
+  // A whole log starts the chunk state over: what was normalized was of the parts just removed.
+  if (input.whole) delete next.normalized;
   await swapMetadata(store, next);
   return { status: "stored", part };
+}
+
+/** Record where a session's log stands when nothing was ingested for it: a trivial session, a
+ * chunk with no records in it. */
+export async function recordNormalized(input: {
+  store: Store;
+  owner: string;
+  agent: string;
+  session_id: string;
+  normalized: NormalizedState;
+  now?: () => Date;
+}): Promise<void> {
+  const { store, owner, normalized } = input;
+  const archive = archiveId(owner, input.agent, input.session_id);
+  const existing = await readMetadata(store, owner, archive);
+  if (!existing || existing.status === "redacted") return;
+  const at = (input.now ?? (() => new Date()))().toISOString();
+  await swapMetadata(store, { ...existing, normalized, updated_at: at });
 }
 
 export interface TombstoneInput {
