@@ -7,7 +7,6 @@ import {
   type GetOptions,
   type ListOptions,
   type ListResult,
-  ObjectExistsError,
   type ObjectStat,
   type PutOptions,
   type Store,
@@ -110,7 +109,6 @@ export class S3Store implements Store {
   }
 
   async put(key: string, body: Uint8Array, options: PutOptions = {}): Promise<void> {
-    if (options.ifNoneMatch && (await this.stat(key)) !== null) throw new ObjectExistsError(key);
     try {
       await this.client.write(this.keyOf(key), body, {
         type: options.contentType ?? "application/octet-stream",

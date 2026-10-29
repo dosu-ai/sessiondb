@@ -440,6 +440,76 @@ describe("sessions", () => {
       expect(second.records_total).toBe(first.records_total + 2);
     });
 
+    /** The agent working: a tool call and its result, no user turn. What most chunks of a
+     * running session are. */
+    const toolTurn = (n: number, command: string, output: string) =>
+      line({
+        type: "assistant",
+        uuid: `a${n}`,
+        timestamp: `2026-09-01T00:${String(n).padStart(2, "0")}:05.000Z`,
+        sessionId: "sess1",
+        message: {
+          role: "assistant",
+          model: "claude-x",
+          content: [{ type: "tool_use", id: `toolu_${n}`, name: "Bash", input: { command } }],
+        },
+      }) +
+      line({
+        type: "user",
+        uuid: `t${n}`,
+        timestamp: `2026-09-01T00:${String(n).padStart(2, "0")}:06.000Z`,
+        sessionId: "sess1",
+        message: {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: `toolu_${n}`, content: output }],
+        },
+      });
+
+    it("ships a chunk that is all tool traffic: a tail is not judged as a conversation", async () => {
+      const [, first] = await post({ transcript: CLAUDE });
+      const [status, answer] = await post({
+        transcript: toolTurn(10, "git status", "clean"),
+        offset: first.bytes_total,
+      });
+      expect(status).toBe(201);
+      expect(answer).toMatchObject({ status: "stored", records: 3 });
+    });
+
+    it("keeps two chunks that say the same thing apart: they are two places in the session", async () => {
+      // The same exchange twice (the user asks again, the agent answers the same); only the
+      // ids and timestamps differ, and those are outside the hash.
+      const again = (n: number) =>
+        line({
+          type: "user",
+          uuid: `u${n}`,
+          timestamp: `2026-09-01T00:${String(n).padStart(2, "0")}:00.000Z`,
+          sessionId: "sess1",
+          message: { role: "user", content: "again?" },
+        }) + toolTurn(n, "ls", `a.ts ${"b.ts ".repeat(500)}`);
+      const [, first] = await post({ transcript: CLAUDE });
+      const [s2, second] = await post({ transcript: again(10), offset: first.bytes_total });
+      const [s3, third] = await post({ transcript: again(11), offset: second.bytes_total });
+      expect([s2, s3]).toEqual([201, 201]);
+      expect(third.status).toBe("stored");
+      const archive = archiveId("acme", "claude-code", "chunked");
+      const metadata = await readMetadata(store, "acme", archive);
+      expect(metadata?.traces).toHaveLength(3);
+      expect(metadata?.traces.map((t) => t.continuation?.from_record)).toEqual([
+        undefined,
+        first.records_total,
+        second.records_total,
+      ]);
+      // Sent again from the same place (a whole upload with `shipped`), the same tail is the
+      // same trace.
+      const [s4, fourth] = await post({
+        transcript: CLAUDE + again(10) + again(11),
+        shipped: { records: second.records_total, prefix_sha256: second.prefix_sha256 },
+      });
+      expect(s4).toBe(200);
+      expect(fourth.status).toBe("duplicate");
+      expect((await readMetadata(store, "acme", archive))?.traces).toHaveLength(3);
+    });
+
     it("holds chunks until the session is worth a trace, then normalizes them together", async () => {
       // The greeting-sized log is trivial; so is its first chunk.
       const [s1, first] = await post({ transcript: SMALL });

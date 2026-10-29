@@ -39,8 +39,6 @@ export interface TraceMetadata {
   parent_session_id?: string;
   /** Set when this trace is the tail of an already-stored session. */
   continuation?: Continuation;
-  /** W3C trace context of the run that produced the session, when the hook saw one. */
-  trace_context?: { trace_id: string; span_id: string };
   /** Which client normalized the records and with what. */
   normalizer?: { name: string; version: string };
   [key: string]: unknown;

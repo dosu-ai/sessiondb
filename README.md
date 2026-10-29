@@ -13,7 +13,7 @@ store, or a folder, under a documented layout that anything can read.
 
 ```
 client ──POST /v1/sessions (raw transcript, bearer token)──▶ sessiondb
-                                                               normalize · redact · ingest
+                                                               store raw · normalize · trace
                                                                     │
                                                                     ▼
                                                    your bucket (s3:// r2:// file://)

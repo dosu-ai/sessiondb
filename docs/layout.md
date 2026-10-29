@@ -37,9 +37,12 @@ writer never puts anything under `sessions/` or `changes/` that is not.
   derived, so no native id or path appears in a key.
 - **content_hash** = `sha256(source + "\n" + body)` where `body` joins the
   trace's events as `role + "\x1f" + text` with `"\x1e"`. Timestamps are
-  outside the hash, so a re-export of the same conversation dedupes. The exact
-  derivation of events and `text` is in [`src/trace/parse.ts`](../src/trace/parse.ts),
-  pinned by the goldens in `testdata/goldens/`.
+  outside the hash, so a re-export of the same conversation dedupes. A
+  continuation hashes `source + "@" + from_record` in place of `source`: the
+  same words at two places in one session are two traces, and a tail sent
+  again from the same place is one. The exact derivation of events and `text`
+  is in [`src/trace/parse.ts`](../src/trace/parse.ts), pinned by the goldens
+  in `testdata/goldens/`.
 - **stamp** in a change key is RFC 3339 UTC to the millisecond with `-` and
   `:` removed (`20261021T210405.123Z`), so keys sort by time and are valid
   file names everywhere.
@@ -75,7 +78,6 @@ later publish does not overwrite it, whatever differs outside the hash.
     "cwd": "/repo/app", "git_branch": "main", "model": "…",   // from the meta record
     "parent_session_id": "…",                                 // lineage, when known at first publish
     "continuation": { "from_record": 6, "prefix_sha256": "…" },
-    "trace_context": { "trace_id": "…", "span_id": "…" },
     "normalizer": { "name": "sessiondb-server", "version": "0.1.0+trajectory.0.3.0" }
   }
 }
@@ -127,7 +129,9 @@ empty `traces`, and no `head` or `source`, and never appears in `changes/`.
 
 A session that grew after it was stored gets a second trace with a
 `continuation`: the tail's records, hashed on their own, plus where in the
-full session they start and a hash of what came before. A reader that wants
+full session they start and a hash of what came before. A tail is judged
+as part of the session, not as a conversation of its own: one that is all
+tool traffic is a trace like any other. A reader that wants
 the whole session concatenates in `traces` order. Whether the growth came as
 a whole upload with `shipped` or as a chunk, the trace is the same.
 
@@ -166,8 +170,8 @@ laptop clocks.
 
 1. Write the object. For a trace, skip if the key exists.
 2. Verify: compare the backend's ETag to the body's MD5 when the ETag is a
-   plain MD5 (single-part PUT on S3, R2, MinIO, and the `fs` store); otherwise
-   read the object back and compare hashes.
+   plain MD5 (single-part PUT on S3, R2, MinIO); otherwise (the `fs` store, a
+   multipart upload) read the object back and compare hashes.
 3. Rewrite `metadata.json`.
 4. Append the change entry.
 

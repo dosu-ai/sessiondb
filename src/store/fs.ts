@@ -1,7 +1,9 @@
 /** A directory as a `Store`: the local target, and what tests use. Writes are temp + rename so a
- * reader never sees a partial object; the ETag is the body's MD5, as S3 reports it. */
+ * reader never sees a partial object. The ETag is the file's size and mtime, not an MD5: a
+ * `stat` must not read the file (the scanner stats every synced session file on every pass), so
+ * `publish` verifies a write here by reading it back. */
 
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import {
   mkdir,
   open,
@@ -19,7 +21,6 @@ import {
   type GetOptions,
   type ListOptions,
   type ListResult,
-  ObjectExistsError,
   type ObjectStat,
   type PutOptions,
   type Store,
@@ -73,9 +74,8 @@ export class FsStore implements Store {
     }
   }
 
-  async put(key: string, body: Uint8Array, options: PutOptions = {}): Promise<void> {
+  async put(key: string, body: Uint8Array, _options: PutOptions = {}): Promise<void> {
     const path = this.pathOf(key);
-    if (options.ifNoneMatch && (await this.stat(key)) !== null) throw new ObjectExistsError(key);
     const tmp = `${path}.${randomBytes(6).toString("hex")}.tmp`;
     try {
       await mkdir(dirname(path), { recursive: true });
@@ -90,12 +90,9 @@ export class FsStore implements Store {
   async stat(key: string): Promise<ObjectStat | null> {
     const path = this.pathOf(key);
     try {
-      const info = await stat(path);
+      const info = await stat(path, { bigint: true });
       if (!info.isFile()) return null;
-      const etag = createHash("md5")
-        .update(await readFile(path))
-        .digest("hex");
-      return { size: info.size, etag };
+      return { size: Number(info.size), etag: `${info.size}-${info.mtimeNs}` };
     } catch (err) {
       if (isNotFound(err)) return null;
       throw new StoreError(`stat ${key}`, err);

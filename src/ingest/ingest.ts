@@ -39,7 +39,6 @@ export interface IngestMetadata {
   branch?: string;
   parent_session_id?: string;
   continuation?: { from_record: number; prefix_sha256: string };
-  trace_context?: { trace_id: string; span_id: string };
   normalizer?: { name: string; version: string };
 }
 
@@ -94,7 +93,6 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
   const traceMetadata: TraceMetadata = {};
   if (metadata.parent_session_id) traceMetadata.parent_session_id = metadata.parent_session_id;
   if (metadata.continuation) traceMetadata.continuation = metadata.continuation;
-  if (metadata.trace_context) traceMetadata.trace_context = metadata.trace_context;
   if (metadata.normalizer) traceMetadata.normalizer = metadata.normalizer;
 
   let trace: Trace;

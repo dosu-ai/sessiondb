@@ -12,9 +12,6 @@ export interface ObjectStat {
 
 export interface PutOptions {
   contentType?: string;
-  /** Fail with `ObjectExistsError` if the key already exists (`If-None-Match: *`). Not every
-   * backend honours it atomically; `publish` re-reads to decide. */
-  ifNoneMatch?: boolean;
 }
 
 export interface ListOptions {
@@ -43,13 +40,6 @@ export interface Store {
   delete(key: string): Promise<void>;
   /** Keys under `prefix`, in lexicographic order. */
   list(prefix: string, options?: ListOptions): Promise<ListResult>;
-}
-
-export class ObjectExistsError extends Error {
-  constructor(readonly key: string) {
-    super(`object exists: ${key}`);
-    this.name = "ObjectExistsError";
-  }
 }
 
 export class StoreError extends Error {

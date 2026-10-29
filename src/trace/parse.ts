@@ -4,7 +4,13 @@
  * point at a single call. */
 
 import { createHash } from "node:crypto";
-import { TRACE_SCHEMA, type Trace, type TraceEvent, type TraceMetadata } from "../schemas/trace";
+import {
+  type Continuation,
+  TRACE_SCHEMA,
+  type Trace,
+  type TraceEvent,
+  type TraceMetadata,
+} from "../schemas/trace";
 import {
   type MetaRecord,
   type NormalizedRecord,
@@ -14,10 +20,17 @@ import {
 import { canonicalText, stripNul } from "./canonical";
 
 /** Hash of what was said, independent of timestamps, so re-exports dedupe.
- * `sha256(source + "\n" + "\x1e".join(role + "\x1f" + text))`, UTF-8. */
-export function contentHash(source: string, events: readonly TraceEvent[]): string {
+ * `sha256(source + "\n" + "\x1e".join(role + "\x1f" + text))`, UTF-8. A continuation hashes
+ * where in the session it starts too (`source + "@" + from_record`): the same words at two
+ * places in one session are two pieces of it, not one re-exported. */
+export function contentHash(
+  source: string,
+  events: readonly TraceEvent[],
+  continuation?: Continuation,
+): string {
   const body = events.map((e) => `${e.role}\x1f${e.text}`).join("\x1e");
-  return createHash("sha256").update(`${source}\n${body}`, "utf8").digest("hex");
+  const head = continuation ? `${source}@${continuation.from_record}` : source;
+  return createHash("sha256").update(`${head}\n${body}`, "utf8").digest("hex");
 }
 
 /** The epoch milliseconds of an ISO 8601 timestamp, or null when it does not parse; what
@@ -93,7 +106,9 @@ function eventsOf(records: readonly NormalizedRecord[]): TraceEvent[] {
 }
 
 /** Whether the events are a usable conversation: a user record, and (unless the source is a
- * human chat, `chat:<origin>`) the agent acting. Anything else is not a trajectory. */
+ * human chat, `chat:<origin>`) the agent acting. Anything else is not a trajectory. Judged on
+ * a whole session only: a continuation is the tail of one already judged, and a tail is often
+ * all tool traffic. */
 function conversationError(source: string, events: readonly TraceEvent[]): string | null {
   const roles = new Set(events.map((e) => e.role));
   if (!roles.has("user")) return "trajectory has no user records";
@@ -113,7 +128,8 @@ export function parseTrajectory(input: unknown, options: ParseOptions = {}): Tra
   }
   const meta: MetaRecord = first;
   const events = eventsOf(records);
-  const problem = conversationError(meta.source, events);
+  const continuation = options.metadata?.continuation;
+  const problem = continuation ? null : conversationError(meta.source, events);
   if (problem) throw new TrajectoryError(problem);
 
   const stamps = events
@@ -132,7 +148,7 @@ export function parseTrajectory(input: unknown, options: ParseOptions = {}): Tra
 
   const trace: Trace = {
     schema: TRACE_SCHEMA,
-    content_hash: contentHash(meta.source, events),
+    content_hash: contentHash(meta.source, events, continuation),
     source: meta.source,
     agent: options.agent ?? meta.source,
     session_id: options.session_id ?? null,
