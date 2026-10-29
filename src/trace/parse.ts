@@ -23,7 +23,7 @@ import { canonicalText, stripNul } from "./canonical";
  * `sha256(source + "\n" + "\x1e".join(role + "\x1f" + text))`, UTF-8. A continuation hashes
  * where in the session it starts too (`source + "@" + from_record`): the same words at two
  * places in one session are two pieces of it, not one re-exported. */
-export function contentHash(
+function contentHash(
   source: string,
   events: readonly TraceEvent[],
   continuation?: Continuation,

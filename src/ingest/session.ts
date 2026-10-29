@@ -78,7 +78,7 @@ interface Whole {
   bytes_total?: number;
 }
 
-export type NormalizeStoredResult =
+type NormalizeStoredResult =
   /** Stored, and nothing in it worth a trace: no head, or nothing new for it. */
   ({ status: "trivial" } & Whole) | (IngestResult & Whole);
 
@@ -132,7 +132,7 @@ async function forkCopy(
   return copiedPrefix(records, trace?.records ?? null);
 }
 
-export interface NormalizeStoredInput {
+interface NormalizeStoredInput {
   owner: string;
   agent: Source;
   session_id: string;
@@ -189,7 +189,7 @@ function logEnd(parts: readonly RawPart[]): number | undefined {
 }
 
 /** The second step on its own: the stored raw to a trace. */
-export async function normalizeStored(
+async function normalizeStored(
   input: NormalizeStoredInput,
   options: SessionOptions,
 ): Promise<NormalizeStoredResult> {

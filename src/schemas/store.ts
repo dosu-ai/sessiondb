@@ -12,7 +12,7 @@ export const LAYOUT_SCHEMA = "sessionstorage/layout/1" as const;
 
 export type SessionStatus = "stored" | "redacted";
 
-/** How a raw transcript part was captured, which decides how a renormalize job reads it. */
+/** How a raw transcript part is encoded: one JSON value per line, or one JSON document. */
 export type RawFormat = "jsonl" | "json";
 
 export interface RawPart {
@@ -75,7 +75,7 @@ export interface SessionMetadata {
   updated_at: string;
 }
 
-export type ChangeKind = "published" | "tombstone" | "renormalized";
+export type ChangeKind = "published" | "tombstone";
 
 export interface ChangeEntry {
   schema: typeof CHANGE_SCHEMA;

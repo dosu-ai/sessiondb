@@ -84,8 +84,8 @@ later publish does not overwrite it, whatever differs outside the hash.
 a span of a session does so by event index range.
 
 `metadata.normalizer` names what produced `records`: the server release and, as
-semver build metadata, the `@letta-ai/trajectory` it ran. A re-normalization
-pass (a `renormalized` change) selects the traces to redo by it.
+semver build metadata, the `@letta-ai/trajectory` it ran, so a reader can tell
+which traces an adapter change affected.
 
 ### `metadata.json` — `sessionstorage/metadata/1`
 
@@ -161,7 +161,7 @@ laptop clocks.
   "owner": "acme", "archive_id": "…", "session_id": "…", "content_hash": "…" }
 ```
 
-`kind` is `published`, `tombstone`, or `renormalized`.
+`kind` is `published` or `tombstone`.
 
 ## The publish protocol
 

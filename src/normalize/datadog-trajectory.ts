@@ -48,7 +48,7 @@ type Event = Record<string, unknown>;
 /** Thrown for a stream this adapter cannot turn into a session. `code` is what the server
  * reports (`missing_session_start`); `missing_user_records` and `missing_assistant_records` mean
  * there is no conversation in it yet. */
-export class DatadogTrajectoryError extends Error {
+class DatadogTrajectoryError extends Error {
   constructor(
     readonly code: "missing_session_start" | "missing_user_records" | "missing_assistant_records",
     message: string,

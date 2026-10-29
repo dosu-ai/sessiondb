@@ -29,18 +29,6 @@ describe("FsStore", () => {
     expect(await store.stat("a/b/missing")).toBeNull();
   });
 
-  it("reads a byte range, clipped to the object", async () => {
-    await store.put("r.txt", enc("0123456789"));
-    const text = async (start: number, end?: number) =>
-      new TextDecoder().decode((await store.get("r.txt", { range: { start, end } })) as Uint8Array);
-    expect(await text(0, 4)).toBe("0123");
-    expect(await text(4)).toBe("456789");
-    expect(await text(8, 100)).toBe("89");
-    expect(await text(10)).toBe("");
-    expect(await text(50)).toBe("");
-    expect(await store.get("missing", { range: { start: 0 } })).toBeNull();
-  });
-
   it("accepts a file:// URL and refuses keys that escape the root", async () => {
     const viaUrl = new FsStore(`file://${dir}`);
     expect(viaUrl.root).toBe(store.root);

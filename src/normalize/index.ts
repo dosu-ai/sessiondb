@@ -27,7 +27,7 @@ import { DATADOG_TRAJECTORY, normalizeDatadogTrajectory } from "./datadog-trajec
 
 /** What a stored trace records as its normalizer: this server's release plus the
  * `@letta-ai/trajectory` it ran, as semver build metadata. Either changing can change the
- * records a transcript normalizes to, so a re-normalization pass selects by both. */
+ * records a transcript normalizes to, so a reader can tell which traces a change affected. */
 export const NORMALIZER = {
   name: "sessiondb-server",
   version: `${VERSION}+trajectory.${trajectoryPackage.version}`,
