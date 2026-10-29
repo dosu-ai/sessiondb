@@ -1,11 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import {
-  DatadogTrajectoryError,
-  describeStream,
-  normalizeDatadogTrajectory,
-} from "./datadog-trajectory";
+import { normalizeDatadogTrajectory } from "./datadog-trajectory";
 import { normalizeTranscript } from "./index";
 
 const fixture = (name: string) =>
@@ -15,41 +11,8 @@ const STREAM = fixture("datadog-claude-session.datadog-trajectory.jsonl");
 /** A session as the daemon keeps it on disk after importing a client's own history. */
 const BACKFILLED = fixture("datadog-backfilled-session.datadog-trajectory.jsonl");
 
-const lines = (stream: string) => stream.split("\n").filter((line) => line.trim() !== "");
 const event = (type: string, extra: Record<string, unknown> = {}) =>
   JSON.stringify({ event_type: type, session_id: "s1", client_source: "pi", ...extra });
-
-describe("describeStream", () => {
-  it("reads the session, its client, and whether the session has ended", () => {
-    expect(describeStream(STREAM)).toEqual({
-      session_id: "0d6f1c2e-7b1a-4c3e-9f2d-5a8b7c6d4e3f",
-      client_source: "claude-code",
-      finished: true,
-      events: 18,
-    });
-  });
-
-  it("calls a stream without session_end a live one", () => {
-    const live = lines(STREAM)
-      .filter((line) => !line.includes('"session_end"'))
-      .join("\n");
-    expect(describeStream(live)).toMatchObject({ finished: false, events: 17 });
-  });
-
-  it("keeps the parent the daemon recorded", () => {
-    const stream = [
-      event("session_start", { parent_session_id: "s0", timestamp: "2026-10-29T20:00:00Z" }),
-    ].join("\n");
-    expect(describeStream(stream)).toMatchObject({ session_id: "s1", parent_session_id: "s0" });
-  });
-
-  it("refuses a stream with no session_start", () => {
-    expect(() => describeStream(event("user_prompt", { prompt: "hi" }))).toThrow(
-      DatadogTrajectoryError,
-    );
-    expect(() => describeStream("")).toThrow(/session_start/);
-  });
-});
 
 describe("normalizeDatadogTrajectory", () => {
   it("maps the daemon's events to trajectory-v1, meta first", () => {

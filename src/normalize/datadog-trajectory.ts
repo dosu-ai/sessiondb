@@ -3,8 +3,8 @@
  * Trajectory (github.com/datadog-labs/trajectory) is Datadog's capture daemon for coding agents.
  * It records each session it captures, from Claude Code, Codex, Cursor, Pi and the rest, as one
  * canonical event per line at `~/.trajectory/trajectories/sessions/<date>/session-<id>.jsonl`.
- * This server has nothing to do with the daemon itself; it reads that format, wherever the
- * files end up (a bucket an owner synced the directory into, a transcript posted by hand).
+ * This server has nothing to do with the daemon itself; it reads that format when a client
+ * posts such a file as a transcript.
  * `@letta-ai/trajectory` has no adapter for it, so this is the server's own, and what it
  * produces is the same trajectory-v1 the Letta adapters produce, hashed, redacted and stored
  * the same way. The events are the daemon's shape, the same for every client it captures, so
@@ -48,7 +48,7 @@ type Event = Record<string, unknown>;
 /** Thrown for a stream this adapter cannot turn into a session. `code` is what the server
  * reports (`missing_session_start`); `missing_user_records` and `missing_assistant_records` mean
  * there is no conversation in it yet. */
-export class DatadogTrajectoryError extends Error {
+class DatadogTrajectoryError extends Error {
   constructor(
     readonly code: "missing_session_start" | "missing_user_records" | "missing_assistant_records",
     message: string,
@@ -56,19 +56,6 @@ export class DatadogTrajectoryError extends Error {
     super(message);
     this.name = "DatadogTrajectoryError";
   }
-}
-
-/** What a delivery is about, read without normalizing it. */
-export interface StreamSummary {
-  session_id: string;
-  /** The client the daemon captured (`claude-code`, `pi`, …), as it names it. */
-  client_source?: string;
-  parent_session_id?: string;
-  /** Whether a `session_end` is in the stream: the delivery the daemon makes once the session
-   * is over, as opposed to the snapshots it sends while the session runs. */
-  finished: boolean;
-  /** How many events the stream holds. */
-  events: number;
 }
 
 function parseEvents(transcript: string): Event[] {
@@ -101,23 +88,6 @@ function sessionStart(events: readonly Event[]): Event {
     );
   }
   return start;
-}
-
-/** Read the stream's identity and whether it is finished. Throws `DatadogTrajectoryError` when
- * there is no `session_start` to identify it by. */
-export function describeStream(transcript: string): StreamSummary {
-  const events = parseEvents(transcript);
-  const start = sessionStart(events);
-  const summary: StreamSummary = {
-    session_id: start.session_id as string,
-    finished: events.some((event) => event.event_type === "session_end"),
-    events: events.length,
-  };
-  const client = present(start.client_source);
-  const parent = present(start.parent_session_id);
-  if (client !== undefined) summary.client_source = client;
-  if (parent !== undefined) summary.parent_session_id = parent;
-  return summary;
 }
 
 function metaOf(start: Event): MetaRecord {

@@ -13,14 +13,6 @@ on the server before anything is written. The server process and the network pat
 secrets. Run it behind TLS (a reverse proxy or a load balancer that terminates HTTPS) and keep
 the host as locked down as anything else that handles credentials.
 
-**A synced Trajectory directory is unredacted, and it is in the bucket.** Syncing
-`~/.trajectory` under an owner's folder is a way to get sessions in without a URL, and what it
-puts in the bucket is Trajectory's own files: the server reads them, writes the redacted
-result under `sessions/`, and leaves them where they are. Trajectory scrubs prompts but not
-the agent's replies, so a token an agent echoed is in the synced file in the clear. Scope
-reader credentials to `sessions/` and `changes/` if readers should see only the archive, and
-treat the synced subtree as the laptop's disk would be treated.
-
 **Redaction is best-effort.** The pass (`src/redact/secrets.ts`) is biased toward
 over-redaction and covers the shapes secrets usually take: provider token prefixes, key/value
 credential assignments, bearer headers, JWTs, connection URLs, private-key blocks, and a

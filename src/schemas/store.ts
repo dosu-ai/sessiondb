@@ -12,7 +12,7 @@ export const LAYOUT_SCHEMA = "sessionstorage/layout/1" as const;
 
 export type SessionStatus = "stored" | "redacted";
 
-/** How a raw transcript part was captured, which decides how a renormalize job reads it. */
+/** How a raw transcript part is encoded: one JSON value per line, or one JSON document. */
 export type RawFormat = "jsonl" | "json";
 
 export interface RawPart {
@@ -24,9 +24,9 @@ export interface RawPart {
   created_at: string;
   /** Where the part sits in the log it was cut from: the byte offset of its first byte, and
    * how many of the log's bytes it covers (before redaction, which can shorten it). Part 0 of a
-   * whole upload starts at 0. Absent on parts stored before chunks were. */
-  offset?: number;
-  length?: number;
+   * whole upload starts at 0. */
+  offset: number;
+  length: number;
 }
 
 /** How far a session's log has been normalized: the state the next chunk continues from. */
@@ -75,7 +75,7 @@ export interface SessionMetadata {
   updated_at: string;
 }
 
-export type ChangeKind = "published" | "tombstone" | "renormalized";
+export type ChangeKind = "published" | "tombstone";
 
 export interface ChangeEntry {
   schema: typeof CHANGE_SCHEMA;

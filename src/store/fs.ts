@@ -1,24 +1,12 @@
 /** A directory as a `Store`: the local target, and what tests use. Writes are temp + rename so a
- * reader never sees a partial object. The ETag is the file's size and mtime, not an MD5: a
- * `stat` must not read the file (the scanner stats every synced session file on every pass), so
- * `publish` verifies a write here by reading it back. */
+ * reader never sees a partial object. The ETag is the file's size and mtime, not an MD5, so a
+ * `stat` never reads the file; `publish` verifies a write here by reading it back. */
 
 import { randomBytes } from "node:crypto";
-import {
-  mkdir,
-  open,
-  readdir,
-  readFile,
-  rename,
-  rm,
-  stat,
-  unlink,
-  writeFile,
-} from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
-  type GetOptions,
   type ListOptions,
   type ListResult,
   type ObjectStat,
@@ -48,26 +36,9 @@ export class FsStore implements Store {
     return join(this.root, ...key.split("/"));
   }
 
-  async get(key: string, options: GetOptions = {}): Promise<Uint8Array | null> {
-    const { range } = options;
+  async get(key: string): Promise<Uint8Array | null> {
     try {
-      if (!range) return new Uint8Array(await readFile(this.pathOf(key)));
-      const file = await open(this.pathOf(key), "r");
-      try {
-        const size = (await file.stat()).size;
-        const start = Math.min(range.start, size);
-        const end = Math.min(range.end ?? size, size);
-        const out = new Uint8Array(Math.max(end - start, 0));
-        let read = 0;
-        while (read < out.length) {
-          const { bytesRead } = await file.read(out, read, out.length - read, start + read);
-          if (bytesRead === 0) break;
-          read += bytesRead;
-        }
-        return out.subarray(0, read);
-      } finally {
-        await file.close();
-      }
+      return new Uint8Array(await readFile(this.pathOf(key)));
     } catch (err) {
       if (isNotFound(err)) return null;
       throw new StoreError(`read ${key}`, err);

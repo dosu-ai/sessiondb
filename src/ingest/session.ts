@@ -1,7 +1,6 @@
-/** One session into the store, however it arrived: the transcript is stored first, as a raw
- * part of the session, and the trace is made from what was stored. So every way in is the same
- * two steps, store → normalize, and the second can run again on its own (an adapter
- * improved, a format was recognized later) without the first.
+/** One session into the store: the transcript is stored first, as a raw part of the session,
+ * and the trace is made from what was stored. Two steps, store → normalize, and the second can
+ * run again on its own (an adapter improved, a format was recognized later) without the first.
  *
  * - `storeSession`: redact the transcript, write it as a raw part (the first one creates the
  *   session), then `normalizeStored`.
@@ -20,8 +19,8 @@
  * has one, every chunk with records in it ships. Whether a session is worth a trace is decided
  * once, not per chunk.
  *
- * The HTTP routes call `storeSession` with what they read off the wire; the bucket scan calls
- * it with what grew in an owner's folder. Nothing here knows about HTTP. */
+ * The HTTP routes call `storeSession` with what they read off the wire. Nothing here knows
+ * about HTTP. */
 
 import { gunzipSync, gzipSync } from "node:zlib";
 import { NORMALIZER, NormalizeError, normalizeTranscript, type Source } from "../normalize";
@@ -73,12 +72,11 @@ export interface SessionOptions {
 interface Whole {
   records_total: number;
   prefix_sha256: string;
-  /** Bytes of the log normalized so far; absent for a session stored before parts recorded
-   * where they sit, which takes a whole upload before it can take a chunk. */
-  bytes_total?: number;
+  /** Bytes of the log normalized so far: where the next chunk starts. */
+  bytes_total: number;
 }
 
-export type NormalizeStoredResult =
+type NormalizeStoredResult =
   /** Stored, and nothing in it worth a trace: no head, or nothing new for it. */
   ({ status: "trivial" } & Whole) | (IngestResult & Whole);
 
@@ -132,7 +130,7 @@ async function forkCopy(
   return copiedPrefix(records, trace?.records ?? null);
 }
 
-export interface NormalizeStoredInput {
+interface NormalizeStoredInput {
   owner: string;
   agent: Source;
   session_id: string;
@@ -174,22 +172,19 @@ async function readPart(
   return new TextDecoder().decode(gunzipSync(bytes));
 }
 
-/** The parts in log order: by where they sit, else by number. */
+/** The parts in log order: by where they sit. */
 function inLogOrder(parts: readonly RawPart[]): RawPart[] {
-  return [...parts].sort((a, b) => (a.offset ?? a.part) - (b.offset ?? b.part) || a.part - b.part);
+  return [...parts].sort((a, b) => a.offset - b.offset || a.part - b.part);
 }
 
-/** Where the log ends after `parts`, when every part says where it sits. */
-function logEnd(parts: readonly RawPart[]): number | undefined {
-  const last = parts.at(-1);
-  if (!last || parts.some((p) => p.offset === undefined || p.length === undefined)) {
-    return undefined;
-  }
-  return (last.offset as number) + (last.length as number);
+/** Where the log ends after `parts`. */
+function logEnd(parts: readonly RawPart[]): number {
+  const last = parts.at(-1) as RawPart;
+  return last.offset + last.length;
 }
 
 /** The second step on its own: the stored raw to a trace. */
-export async function normalizeStored(
+async function normalizeStored(
   input: NormalizeStoredInput,
   options: SessionOptions,
 ): Promise<NormalizeStoredResult> {
@@ -206,7 +201,6 @@ export async function normalizeStored(
   }
   const continues =
     stored !== undefined &&
-    stored.offset !== undefined &&
     stored.offset > 0 &&
     metadata.head !== undefined &&
     metadata.normalized !== undefined &&
@@ -233,19 +227,16 @@ async function wholeStored(
   const records = normalize({ source: agent, transcript });
   const hash = PrefixHash.of(records);
   const bytes = logEnd(parts);
-  const normalized: NormalizedState | undefined =
-    bytes === undefined
-      ? undefined
-      : {
-          bytes,
-          records: records.length,
-          prefix_sha256: hash.digest(),
-          hash_state: hash.export(),
-        };
+  const normalized: NormalizedState = {
+    bytes,
+    records: records.length,
+    prefix_sha256: hash.digest(),
+    hash_state: hash.export(),
+  };
   const whole: Whole = {
     records_total: records.length,
     prefix_sha256: hash.digest(),
-    ...(bytes === undefined ? {} : { bytes_total: bytes }),
+    bytes_total: bytes,
   };
 
   // A resumed session: the client says how much shipped before (what it stored from the last
@@ -255,8 +246,7 @@ async function wholeStored(
   const copied = await forkCopy(store, owner, agent, input.fork_of, records);
   if (!plan.continuation && copied) plan = planShipment(records, copied);
   if (isTrivialTrajectory(plan.fresh)) {
-    if (normalized)
-      await recordNormalized({ store, owner, agent, session_id: sessionId, normalized, now });
+    await recordNormalized({ store, owner, agent, session_id: sessionId, normalized, now });
     return { status: "trivial", ...whole };
   }
 
@@ -294,8 +284,8 @@ async function continueStored(
   const { store, client, now } = options;
   const { owner, agent, session_id: sessionId } = input;
   const state = metadata.normalized as NormalizedState;
-  const offset = stored.offset as number;
-  const bytes = offset + (stored.length as number);
+  const offset = stored.offset;
+  const bytes = offset + stored.length;
 
   const transcript = await readPart(store, owner, metadata.archive_id, stored);
   const records = normalize({

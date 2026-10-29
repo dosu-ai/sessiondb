@@ -479,7 +479,7 @@ function codexMessage(role: string, text: string): Record<string, unknown> {
 
 /** The same client's session as the daemon writes it to
  * `~/.trajectory/trajectories/sessions/<date>/session-<id>.jsonl` after `trajectory session
- * import claude`, which is what a Trajectory install synced to a bucket holds for its history:
+ * import claude`, which is what a Trajectory install holds for a client's history:
  * `_backfilled`, `cwd` rather than `project_dir`, a prompt-less `user_prompt` for the turn the
  * tool result came back in, a tool call present only as its `post` event, and no
  * `agent_message` at all. Shaped on what trajectory 0.6.1 wrote for `claude-basic`. */

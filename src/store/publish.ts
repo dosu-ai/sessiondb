@@ -19,7 +19,7 @@ import { type Store, StoreError } from "./store";
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-export function md5(bytes: Uint8Array): string {
+function md5(bytes: Uint8Array): string {
   return createHash("md5").update(bytes).digest("hex");
 }
 

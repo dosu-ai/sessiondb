@@ -1,18 +1,18 @@
 # The sessiondb server
 
-A client posts the raw transcript of a finished session; the server redacts it and writes it to
-the bucket as the session's raw part, then normalizes what it stored to trajectory-v1, decides
-whether it is worth a trace and how much of it is new, and writes the trace beside it, in the
-[layout](layout.md). Storage first, then normalize: a Datadog Trajectory directory synced
-into the bucket is the first step already done, and the server picks it up at the second. Anything that reads the layout reads the
-bucket directly: the server is the only writer and no reader's dependency.
+A client posts the raw transcript of a session, whole or in chunks as it grows; the server
+redacts it and writes it to the bucket as the session's raw part, then normalizes what it
+stored to trajectory-v1, decides whether it is worth a trace and how much of it is new, and
+writes the trace beside it, in the [layout](layout.md). Storage first, then normalize, so the
+trace can always be remade from the bucket. Anything that reads the layout reads the bucket
+directly: the server is the only writer and no reader's dependency.
 
 ```
 client ──POST /v1/sessions (raw transcript, bearer token)──▶ sessiondb server
                                                                store raw · normalize · trace
-                                                                    │        ▲
-                                                                    ▼        │ scan: Trajectory-format files
-                                                   the bucket (s3:// r2:// file://)   under owners/<name>/
+                                                                    │
+                                                                    ▼
+                                                   the bucket (s3:// r2:// file://)
                                                                     ▲
                                                  readers tail changes/ (their own read-only key)
 ```
@@ -41,7 +41,6 @@ session.
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | for `r2://` | |
 | `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | for `s3://` | Or Bun's `S3_*` equivalents; `S3_ENDPOINT` for MinIO, Backblaze, Wasabi… |
 | `PORT` | | Default `7200` |
-| `SESSIONDB_SCAN_INTERVAL` | | Seconds between scans of each owner's folder for [Datadog Trajectory session files synced into the bucket](#a-synced-trajectory-install). Default `300`; `0` never scans |
 
 Put TLS in front of it (a reverse proxy, Cloud Run, a load balancer): transcripts arrive
 unredacted and the server is where that stops being true.
@@ -51,16 +50,16 @@ unredacted and the server is where that stops being true.
 Every release is published as a container image, `ghcr.io/dosu-ai/sessiondb:<version>`, built
 from the `Dockerfile` in this repository. It listens on `PORT` (default `7200`), reports
 `/healthz` for liveness, and needs only the environment variables above: there is no database,
-no volume (unless the store is `file://`), and no state outside the bucket, so any platform that
-runs a container works. Keep the request timeout at 120 seconds or more; a large transcript can
-take that long to normalize and verify. Platforms that cap request bodies (Cloud Run's HTTP/1
-limit is 32 MiB) are fine as long as clients send `Content-Encoding: gzip`, which every route
-accepts.
+no volume (unless the store is `file://`), no background work, and no state outside the bucket,
+so any platform that runs a container works, scaled to zero or to many instances alike. Keep
+the request timeout at 120 seconds or more; a large transcript can take that long to normalize
+and verify. Platforms that cap request bodies (Cloud Run's HTTP/1 limit is 32 MiB) are fine as
+long as clients send `Content-Encoding: gzip`, which every route accepts.
 
 ### Who sees what
 
 A token is bound to one name and the server scopes every call to `owners/<name>/`: the
-session list, reads, deletes, the change log and raw object reads. Two people on one server
+session list, reads, deletes and the change log. Two people on one server
 never see each other's transcripts; a token leaked from one laptop exposes one person's
 sessions. A reader with its own bucket key sees every folder. That is the point: the team's
 archive is the whole bucket, a person's view is their own folder.
@@ -94,8 +93,6 @@ Request bodies may be `Content-Encoding: gzip`. Every route but `/healthz` wants
 | `GET /v1/sessions/:agent/:session_id/trace?hash` | The head trace (or a specific one); `404 no_trace` while raw only, `410` once redacted |
 | `DELETE /v1/sessions/:agent/:session_id` | Tombstone: drop trace and raw objects, append a tombstone change. Irreversible; a later upload of the same session is refused |
 | `GET /v1/changes?after&since&limit` | The change feed |
-| `GET /v1/objects?prefix&after&limit` | List keys under `owners/<owner>/` |
-| `GET /v1/objects/<key>` · `HEAD` | Read one object / its size and ETag. Read-only; writes go through `/v1/sessions` |
 
 ### `POST /v1/sessions`
 
@@ -207,12 +204,10 @@ It has no dependency on the daemon or its CLI and no endpoint for it; `datadog-t
 one more transcript format, normalized to trajectory-v1 by the server's own adapter
 (`@letta-ai/trajectory` has none for it) and stored like every other.
 
-Two ways a file in that format gets in:
-
-- Posted, as `POST /v1/sessions` with `agent: "datadog-trajectory"` and the file as
-  `transcript`, whole or [in chunks](#in-chunks). A file with no `session_end` is a session
-  that was still running when it was copied; it normalizes to what it has so far.
-- Found in the bucket: the owner's Trajectory directory synced under their folder, below.
+A file in that format gets in like any other transcript: `POST /v1/sessions` with
+`agent: "datadog-trajectory"` and the file as `transcript`, whole or [in chunks](#in-chunks) as
+the daemon appends to it. A file with no `session_end` is a session that is still running; it
+normalizes to what it has so far, and the next chunk continues it.
 
 The session is filed as `agent: datadog-trajectory` and its trace's `source` names the client
 the daemon captured, `datadog-trajectory:claude-code`, so a session captured both ways (a
@@ -229,38 +224,7 @@ conversation and are dropped; a subagent's answer arrives as the `Agent` tool's 
 own session as its own file. A file with no `session_start` gets `422
 normalize_missing_session_start`.
 
-#### A Trajectory directory in the bucket
-
-Sync the directory into the bucket under the owner's folder, and the server finds the sessions
-there; nothing is posted and no URL is configured anywhere.
-
-```bash
-aws s3 sync ~/.trajectory s3://bucket/prefix/owners/alice/.trajectory
-```
-
-At boot and every `SESSIONDB_SCAN_INTERVAL` seconds (default 300) the server lists each
-owner's folder, for every owner it has a token for, and reads every `session-<id>.jsonl` it
-finds anywhere under it: Trajectory's own naming, so the directory can land at any subpath.
-Each file goes through the same pipeline a POST does (a redacted copy as a raw part of the
-session, then the trace from it), filed under `agent: datadog-trajectory` with `source:
-datadog-trajectory:<client>`.
-
-A session's file grows with each sync while the session runs, and the scan reads only what
-grew: the session's `metadata.json` says how many of the file's bytes were normalized, the
-bytes past that are read with a range request, and they go in [as a chunk](#in-chunks), a
-continuation of the session's trace. So a running session is in the archive as it goes (a
-session with only a prompt so far is `trivial` until an answer arrives), each scan costs what
-was appended since the last one, and a restart picks up where the archive says rather than
-reading everything again. A file that shrank was rewritten and is read whole again; its content
-dedupes. The synced files are never touched, so `aws s3 sync` keeps working, and the server
-remembers each key's ETag, so an unchanged file costs a `stat` per scan. What a scan did is in
-the server log, one line per stored, trivial or rejected file and a summary per scan that read
-anything.
-
 A session the daemon imported from a client's own history (`trajectory session import`) is
 thinner than one it captured live: no prose from the agent, and tool calls present only as
 their results. The adapter reads those too, and most come out `trivial`, which is right: there
 is no conversation in them.
-
-The synced files are Trajectory's, not this server's: unredacted, under the owner's folder,
-beside the redacted archive. See [`SECURITY.md`](../SECURITY.md).

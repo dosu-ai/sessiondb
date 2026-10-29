@@ -18,7 +18,7 @@ import {
 import { isSource, SOURCES, type Source } from "./normalize";
 import type { RawFormat } from "./schemas/store";
 import { readChanges } from "./store/changes";
-import { archiveId, assertOwner, keys } from "./store/layout";
+import { archiveId, assertOwner } from "./store/layout";
 import { type Store, StoreError } from "./store/store";
 import { VERSION } from "./version";
 
@@ -321,52 +321,6 @@ export function createApp(options: AppOptions) {
       limit: intParam(url, "limit", 100, 1000),
     });
     return json(page);
-  });
-
-  // --- raw object reads ----------------------------------------------------------
-  // Read-only access to the keys under the token's own `owners/<owner>/`, so a client can read
-  // the layout over HTTP. Writes stay behind /v1/sessions, where normalization and redaction
-  // happen.
-
-  function ownedKey(owner: string, key: string): string {
-    const root = `${keys.owner(owner)}/`;
-    if (key !== root.slice(0, -1) && !key.startsWith(root)) {
-      throw new HttpError(403, "forbidden", `keys must be under ${root}`);
-    }
-    return key;
-  }
-
-  route("GET", "/v1/objects", async ({ request, url }) => {
-    const owner = authorize(request);
-    const prefix = ownedKey(owner, url.searchParams.get("prefix") ?? keys.owner(owner));
-    const page = await store.list(prefix, {
-      startAfter: url.searchParams.get("after") ?? undefined,
-      limit: intParam(url, "limit", 1000, 1000),
-    });
-    return json(page);
-  });
-
-  route("GET", "/v1/objects/*key", async ({ request, params }) => {
-    const owner = authorize(request);
-    const key = ownedKey(owner, params.key as string);
-    const bytes = await store.get(key);
-    if (bytes === null) throw new HttpError(404, "not_found", `no object ${key}`);
-    return new Response(new Uint8Array(bytes) as Uint8Array<ArrayBuffer>, {
-      headers: { "content-type": "application/octet-stream", "content-length": `${bytes.length}` },
-    });
-  });
-
-  route("HEAD", "/v1/objects/*key", async ({ request, params }) => {
-    const owner = authorize(request);
-    const key = ownedKey(owner, params.key as string);
-    const stat = await store.stat(key);
-    if (stat === null) return new Response(null, { status: 404 });
-    return new Response(null, {
-      headers: {
-        "content-length": `${stat.size}`,
-        ...(stat.etag ? { etag: stat.etag } : {}),
-      },
-    });
   });
 
   // --- dispatch -----------------------------------------------------------------

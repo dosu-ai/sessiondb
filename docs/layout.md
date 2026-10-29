@@ -18,14 +18,11 @@ writes it.) The server is the only writer today; any other writer must follow th
     changes/
       <stamp>-<content_hash>.json                     a publish
       <stamp>-tombstone.json                          a tombstone
-    <anything else>/                                  the owner's, not the layout's (see below)
 ```
 
-An owner's folder may hold objects that are not the layout's: a Datadog
-Trajectory directory synced there as-is, which the server reads sessions
-from ([server.md](server.md#a-synced-trajectory-install)). The layout's own
-objects are exactly the keys named above; a reader ignores the rest, and a
-writer never puts anything under `sessions/` or `changes/` that is not.
+The layout's own objects are exactly the keys named above; a reader ignores
+anything else under the prefix, and a writer never puts anything under
+`sessions/` or `changes/` that is not.
 
 ## Identifiers
 
@@ -87,8 +84,8 @@ later publish does not overwrite it, whatever differs outside the hash.
 a span of a session does so by event index range.
 
 `metadata.normalizer` names what produced `records`: the server release and, as
-semver build metadata, the `@letta-ai/trajectory` it ran. A re-normalization
-pass (a `renormalized` change) selects the traces to redo by it.
+semver build metadata, the `@letta-ai/trajectory` it ran, so a reader can tell
+which traces an adapter change affected.
 
 ### `metadata.json` — `sessionstorage/metadata/1`
 
@@ -150,8 +147,7 @@ per chunk, each saying where it sits in the log (`offset`, `length`: the
 log's bytes before redaction, which can shorten what is stored), and the
 parts in `offset` order, concatenated, are the log. The same bytes at the
 same part are a no-op, different bytes replace; a whole upload removes every
-other part. `offset` and `length` are absent on parts stored before chunks
-were, and such a session takes a whole upload before it can take a chunk.
+other part.
 
 ### `changes/<stamp>-<hash|tombstone>.json` — `sessionstorage/change/1`
 
@@ -164,7 +160,7 @@ laptop clocks.
   "owner": "acme", "archive_id": "…", "session_id": "…", "content_hash": "…" }
 ```
 
-`kind` is `published`, `tombstone`, or `renormalized`.
+`kind` is `published` or `tombstone`.
 
 ## The publish protocol
 

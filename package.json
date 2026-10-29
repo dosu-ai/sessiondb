@@ -15,6 +15,7 @@
     "lint": "bunx biome lint .",
     "format": "bunx biome format --write .",
     "check": "bunx biome check .",
+    "fixtures": "bun run scripts/fixtures.ts",
     "goldens": "bun run scripts/goldens.ts"
   },
   "dependencies": {
