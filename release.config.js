@@ -18,11 +18,10 @@ export default {
     [
       "@semantic-release/exec",
       {
-        // After the npm plugin has written the SDK's version: give the server the same one,
-        // refresh bun.lock (it records workspace versions; a stale one fails the next
-        // --frozen-lockfile install), and build dist/ so it carries the new version.
+        // After the npm plugin has written the SDK's version: give the server and bun.lock
+        // the same one, and build dist/ so it carries the new version.
         prepareCmd:
-          "bun run scripts/release-version.ts ${nextRelease.version} && bun install && bun run --cwd sdks/typescript build",
+          "bun run scripts/release-version.ts ${nextRelease.version} && bun run --cwd sdks/typescript build",
         successCmd:
           "echo 'released=true' >> $GITHUB_OUTPUT && echo 'version=${nextRelease.version}' >> $GITHUB_OUTPUT",
       },

@@ -1,5 +1,6 @@
-/** Sets server/package.json's version: the release's, which semantic-release has already
- * written into sdks/typescript/package.json. The two move together (release.config.js). */
+/** Sets the release's version everywhere semantic-release's npm plugin does not: server/package.json
+ * (the SDK's is already written), and the two workspace entries in bun.lock, which `bun install`
+ * leaves alone on a version-only change. The two packages move together (release.config.js). */
 
 import { join } from "node:path";
 
@@ -18,3 +19,12 @@ for (const pkg of ["server", "sdks/typescript"]) {
   }
   console.log(`${pkg}/package.json: ${version}`);
 }
+
+const lockPath = join(import.meta.dir, "..", "bun.lock");
+const lock = await Bun.file(lockPath).text();
+const synced = lock.replace(
+  /("name": "(?:@dosu\/sessiondb|sessiondb-server)",\n\s*"version": ")[^"]+(")/g,
+  `$1${version}$2`,
+);
+if (synced !== lock) await Bun.write(lockPath, synced);
+console.log(`bun.lock: ${version}`);
