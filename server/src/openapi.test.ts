@@ -125,11 +125,18 @@ afterEach(() => {
 async function call(
   method: string,
   path: string,
-  options: { token?: string | null; body?: unknown; raw?: string; app?: App } = {},
+  options: {
+    token?: string | null;
+    body?: unknown;
+    raw?: string;
+    encoding?: string;
+    app?: App;
+  } = {},
 ): Promise<{ status: number; body: unknown }> {
   const url = new URL(`http://sessiondb.test${path}`);
   const op = operationFor(method, url.pathname);
   const headers: Record<string, string> = {};
+  if (options.encoding) headers["content-encoding"] = options.encoding;
   if (options.token !== null) headers.authorization = `Bearer ${options.token ?? TOKEN}`;
   let body: string | undefined;
   if (options.raw !== undefined) {
@@ -314,6 +321,8 @@ describe("the server honours it", () => {
       ).status,
     ).toBe(401);
     expect((await call("POST", "/v1/sessions", { raw: "{not json" })).status).toBe(400);
+    expect((await call("POST", "/v1/sessions", { raw: "{}", encoding: "gzip" })).status).toBe(400);
+    expect((await call("POST", "/v1/sessions", { raw: "{}", encoding: "br" })).status).toBe(415);
     expect(
       (
         await call("POST", "/v1/sessions", {

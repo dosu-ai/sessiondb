@@ -93,7 +93,7 @@ with the schemas of the objects they carry. `server/src/openapi.test.ts` holds t
 cannot drift apart. What follows is the same API in prose.
 
 All bodies are JSON unless a route says otherwise. Errors are `{ "error": { "code", "message" } }`.
-Request bodies may be `Content-Encoding: gzip`. Every route but `/healthz` wants
+Request bodies may be `Content-Encoding: gzip` (any other encoding is a `415`). Every route but `/healthz` wants
 `Authorization: Bearer <token>`.
 
 | | |

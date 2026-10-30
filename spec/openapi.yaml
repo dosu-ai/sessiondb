@@ -116,6 +116,7 @@ paths:
               schema: { $ref: "#/components/schemas/IngestResult" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "415": { $ref: "#/components/responses/UnsupportedEncoding" }
         "409":
           description: |
             A chunk that does not start where the session's log ends. Nothing is stored; the
@@ -291,8 +292,15 @@ components:
     BadRequest:
       description: |
         The request is malformed: not JSON, a missing or mistyped field, a bad query value,
-        an unsupported `Content-Encoding`. `code` is one of `bad_json`, `missing_field`,
-        `bad_field`, `bad_query`, `bad_encoding`.
+        a `Content-Encoding: gzip` body that is not gzip. `code` is one of `bad_json`,
+        `missing_field`, `bad_field`, `bad_query`, `bad_encoding`.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    UnsupportedEncoding:
+      description: |
+        A `Content-Encoding` other than `gzip` or `identity`; the body was not read. `code` is
+        `unsupported_encoding`.
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
