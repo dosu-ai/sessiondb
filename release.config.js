@@ -5,6 +5,11 @@
  * (what traces record as their normalizer, and what /healthz reports), so one tag is one
  * release of both.
  *
+ * npm is driven directly rather than through @semantic-release/npm: that plugin runs
+ * `npm version` inside sdks/typescript, where npm finds the Bun workspace root above it, loads
+ * the whole tree and rejects server/package.json's `workspace:*` dependency. `--workspaces=false`
+ * keeps npm inside the SDK directory, and only the command line can set it.
+ *
  * @type {import('semantic-release').GlobalConfig} */
 export default {
   branches: ["main"],
@@ -12,16 +17,19 @@ export default {
     "@semantic-release/commit-analyzer",
     "@semantic-release/release-notes-generator",
     "@semantic-release/changelog",
-    // Writes the version into sdks/typescript/package.json and publishes from there. Scripts
-    // are off for that publish (NPM_CONFIG_IGNORE_SCRIPTS in ci.yml): dist/ is built below.
-    ["@semantic-release/npm", { pkgRoot: "sdks/typescript" }],
     [
       "@semantic-release/exec",
       {
-        // After the npm plugin has written the SDK's version: give the server and bun.lock
-        // the same one, and build dist/ so it carries the new version.
+        // actions/setup-node writes the npm token from NODE_AUTH_TOKEN into the user .npmrc.
+        verifyConditionsCmd:
+          "test -n \"$NODE_AUTH_TOKEN\" || { echo 'NODE_AUTH_TOKEN (the npm token) is not set' >&2; exit 1; }",
+        // Write the version into both package.json files and bun.lock, and build dist/ so it
+        // carries the new version. (@semantic-release/git commits those files below.)
         prepareCmd:
           "bun run scripts/release-version.ts ${nextRelease.version} && bun run --cwd sdks/typescript build",
+        // Scripts are off for this publish (NPM_CONFIG_IGNORE_SCRIPTS in ci.yml): dist/ was just
+        // built, so prepack must not rebuild it. Provenance comes from NPM_CONFIG_PROVENANCE.
+        publishCmd: "cd sdks/typescript && npm publish --workspaces=false --access public",
         successCmd:
           "echo 'released=true' >> $GITHUB_OUTPUT && echo 'version=${nextRelease.version}' >> $GITHUB_OUTPUT",
       },
