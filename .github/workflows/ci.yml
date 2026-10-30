@@ -95,12 +95,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          # Writes an .npmrc that reads the publish token from NODE_AUTH_TOKEN.
+          registry-url: https://registry.npmjs.org
       - run: bun install --frozen-lockfile
       - id: release
         run: bunx semantic-release
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: "true"
           # dist/ is built once by the release's prepare step; do not let prepack rebuild it.
           NPM_CONFIG_IGNORE_SCRIPTS: "true"
