@@ -1,6 +1,6 @@
 {
   "name": "@dosu/sessiondb",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "The sessiondb SDK: redact, normalize and store coding-agent sessions in the sessionstorage layout, and read them back. The server is a thin HTTP wrapper around this package.",
   "license": "MIT",
   "repository": {
