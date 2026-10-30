@@ -1,6 +1,6 @@
 {
   "name": "sessiondb",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "The sessiondb server: coding-agent sessions as a durable, redacted, content-addressed store. Clients upload raw transcripts with a token; the server normalizes, redacts and writes them to the owner's S3 / R2 bucket.",
   "license": "MIT",
