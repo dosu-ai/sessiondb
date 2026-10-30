@@ -56,8 +56,12 @@ jobs:
   # Every push to main with a Conventional Commit since the last release is a release
   # (release.config.js): the version is chosen from the commits, @dosu/sessiondb goes to npm with
   # provenance, a vX.Y.Z tag and a GitHub release are cut, and the image job below publishes
-  # ghcr.io/dosu-ai/sessiondb at the same version. Needs the NPM_TOKEN repository secret: an npm
-  # granular token with publish rights on the @dosu org.
+  # ghcr.io/dosu-ai/sessiondb at the same version.
+  #
+  # Needs the NPM_TOKEN repository secret (an npm granular token with publish rights on the
+  # @dosu org). The release commit and tag are pushed as the abbs-bot GitHub App, the org's
+  # release bot (its credentials are the org-wide ABBS_BOT_* secrets): main only takes pull
+  # requests, and that app is the ruleset's one bypass actor.
   release:
     needs: [test, docker]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -71,6 +75,16 @@ jobs:
       released: ${{ steps.release.outputs.released }}
       version: ${{ steps.release.outputs.version }}
     steps:
+      - id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ secrets.ABBS_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.ABBS_BOT_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: sessiondb
+          permission-contents: write
+          permission-issues: write
+          permission-pull-requests: write
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
@@ -85,7 +99,7 @@ jobs:
       - id: release
         run: bunx semantic-release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: "true"
           # dist/ is built once by the release's prepare step; do not let prepack rebuild it.
