@@ -149,13 +149,14 @@ bun run test          # the S3 store test needs SESSIONDB_TEST_S3_* and skips wi
 bun run typecheck
 bun run check         # biome lint + format
 bun run goldens       # regenerate testdata/goldens after a deliberate change to hashing or events
-bun run e2e           # ship a Datadog Trajectory session to a running server, whole and in chunks
+bun run e2e           # fake a Datadog Trajectory session and ship it to a running server, whole and in chunks
 ```
 
-`bun run e2e` talks to `http://localhost:7200` with the first token in `.env` (so `bun start`
-in another terminal is enough), or to `SESSIONDB_URL` with `SESSIONDB_TOKEN`. It uses the newest
-session the Trajectory daemon has written on this machine, else the fixture; `--install` sets
-the daemon up locally so a real one exists.
+`bun run e2e` writes a session in the Trajectory daemon's format (with a credential planted, so
+redaction is visible), ships it to `http://localhost:7200` with the first token in `.env` (so
+`bun start` in another terminal is enough) or to `SESSIONDB_URL` with `SESSIONDB_TOKEN`, checks
+the whole and chunked uploads agree, reads the trace back, and tombstones the test sessions.
+A real session file from `~/.trajectory/trajectories/sessions/` can be passed instead.
 
 `testdata/goldens/` pins the normalized records of every fixture transcript and the
 `content_hash` and events each parses to. The goldens test fails on any change to the hash
