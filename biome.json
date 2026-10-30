@@ -14,7 +14,15 @@
     }
   },
   "files": {
-    "includes": ["sdks/typescript/**", "server/**", "*.ts", "*.json", "!spec/testdata", "!**/*.md"]
+    "includes": [
+      "sdks/typescript/**",
+      "server/**",
+      "scripts/**",
+      "*.ts",
+      "*.json",
+      "!spec/testdata",
+      "!**/*.md"
+    ]
   },
   "formatter": {
     "enabled": true,

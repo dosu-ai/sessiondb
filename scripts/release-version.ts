@@ -6,7 +6,9 @@ import { join } from "node:path";
 
 const version = process.argv[2];
 if (!version || !/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(version)) {
-  console.error(`usage: bun run scripts/release-version.ts <X.Y.Z>; got ${JSON.stringify(version)}`);
+  console.error(
+    `usage: bun run scripts/release-version.ts <X.Y.Z>; got ${JSON.stringify(version)}`,
+  );
   process.exit(2);
 }
 
