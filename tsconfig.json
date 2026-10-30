@@ -8,8 +8,14 @@
     "skipLibCheck": true,
     "sourceMap": true,
     "resolveJsonModule": true,
-    "types": ["bun"]
+    "types": ["bun"],
+    "customConditions": ["bun"]
   },
-  "include": ["src/**/*", "scripts/**/*", "vitest.config.ts"],
+  "include": [
+    "sdks/typescript/src/**/*",
+    "sdks/typescript/scripts/**/*",
+    "server/src/**/*",
+    "vitest.config.ts"
+  ],
   "exclude": ["node_modules", "dist"]
 }

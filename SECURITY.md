@@ -13,7 +13,7 @@ on the server before anything is written. The server process and the network pat
 secrets. Run it behind TLS (a reverse proxy or a load balancer that terminates HTTPS) and keep
 the host as locked down as anything else that handles credentials.
 
-**Redaction is best-effort.** The pass (`src/redact/secrets.ts`) is biased toward
+**Redaction is best-effort.** The pass (`sdks/typescript/src/redact/secrets.ts`) is biased toward
 over-redaction and covers the shapes secrets usually take: provider token prefixes, key/value
 credential assignments, bearer headers, JWTs, connection URLs, private-key blocks, and a
 Shannon-entropy pass for anything long and random in a secret-shaped position. A secret in a

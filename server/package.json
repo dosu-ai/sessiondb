@@ -1,0 +1,23 @@
+{
+  "name": "sessiondb-server",
+  "version": "0.1.1",
+  "private": true,
+  "description": "The sessiondb server: an HTTP front for @dosu/sessiondb. Clients upload raw transcripts with a token; the server redacts, normalizes and writes them to the owner's bucket.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "github:dosu-ai/sessiondb",
+    "directory": "server"
+  },
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/main.ts",
+    "dev": "bun --watch run src/main.ts"
+  },
+  "dependencies": {
+    "@dosu/sessiondb": "workspace:*"
+  },
+  "engines": {
+    "bun": ">=1.3"
+  }
+}
