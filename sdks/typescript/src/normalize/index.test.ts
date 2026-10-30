@@ -3,7 +3,16 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { isSource, NormalizeError, normalizeTranscript } from "./index";
 
-const TRANSCRIPTS = join(import.meta.dirname, "..", "..", "testdata", "transcripts");
+const TRANSCRIPTS = join(
+  import.meta.dirname,
+  "..",
+  "..",
+  "..",
+  "..",
+  "spec",
+  "testdata",
+  "transcripts",
+);
 const read = (name: string) => readFileSync(join(TRANSCRIPTS, name), "utf8");
 
 const GITHUB_TOKEN = "ghp_abcdefghijklmnopqrstuvwxyz012345";

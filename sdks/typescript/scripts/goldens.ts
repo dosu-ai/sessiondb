@@ -1,7 +1,7 @@
-/** Regenerates the snapshots in `testdata/goldens/`:
+/** Regenerates the snapshots in `spec/testdata/goldens/`:
  *
- * 1. every transcript in `testdata/transcripts/` is normalized (redacted) and the records
- *    written to `<name>.records.json`; every hand-written record set in `testdata/records/` is
+ * 1. every transcript in `spec/testdata/transcripts/` is normalized (redacted) and the records
+ *    written to `<name>.records.json`; every hand-written record set in `spec/testdata/records/` is
  *    copied in as-is (edge cases no adapter produces);
  * 2. each record set is parsed and what came out — `content_hash`, events, the rest of the
  *    trace, or the rejection — is written to `<name>.expected.json`.
@@ -17,7 +17,7 @@ import { TrajectoryError } from "../src/schemas/trajectory";
 import { expectedOf } from "../src/trace/goldens";
 import { parseTrajectory } from "../src/trace/parse";
 
-const ROOT = resolve(import.meta.dir, "..");
+const ROOT = resolve(import.meta.dir, "..", "..", "..", "spec");
 const TRANSCRIPTS = join(ROOT, "testdata", "transcripts");
 const RECORDS = join(ROOT, "testdata", "records");
 const GOLDENS = join(ROOT, "testdata", "goldens");

@@ -3,7 +3,7 @@
 A client posts the raw transcript of a session, whole or in chunks as it grows; the server
 redacts it and writes it to the bucket as the session's raw part, then normalizes what it
 stored to trajectory-v1, decides whether it is worth a trace and how much of it is new, and
-writes the trace beside it, in the [layout](layout.md). Storage first, then normalize, so the
+writes the trace beside it, in the [layout](../spec/layout.md). Storage first, then normalize, so the
 trace can always be remade from the bucket. Anything that reads the layout reads the bucket
 directly: the server is the only writer and no reader's dependency.
 
@@ -48,7 +48,8 @@ unredacted and the server is where that stops being true.
 ### Deploying
 
 Every release is published as a container image, `ghcr.io/dosu-ai/sessiondb:<version>`, built
-from the `Dockerfile` in this repository. It listens on `PORT` (default `7200`), reports
+from `server/Dockerfile` in this repository (`docker build -f server/Dockerfile .` from the
+root). It listens on `PORT` (default `7200`), reports
 `/healthz` for liveness, and needs only the environment variables above: there is no database,
 no volume (unless the store is `file://`), no background work, and no state outside the bucket,
 so any platform that runs a container works, scaled to zero or to many instances alike. Keep

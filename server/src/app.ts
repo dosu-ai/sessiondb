@@ -7,19 +7,27 @@
  * holds an unredacted byte. */
 
 import { timingSafeEqual } from "node:crypto";
-import { getSession, getTrace, IngestRejected, listSessions, tombstone } from "./ingest/ingest";
 import {
+  archiveId,
+  assertOwner,
+  getSession,
+  getTrace,
+  IngestRejected,
+  isSource,
+  listSessions,
   OffsetMismatch,
+  type RawFormat,
+  readChanges,
   SessionRejected,
   type SessionUpload,
+  SOURCES,
+  type Source,
+  type Store,
+  StoreError,
   type StoreSessionResult,
   storeSession,
-} from "./ingest/session";
-import { isSource, SOURCES, type Source } from "./normalize";
-import type { RawFormat } from "./schemas/store";
-import { readChanges } from "./store/changes";
-import { archiveId, assertOwner } from "./store/layout";
-import { type Store, StoreError } from "./store/store";
+  tombstone,
+} from "@dosu-ai/sessiondb";
 import { VERSION } from "./version";
 
 /** What `GET /v1/me` says about the bucket: enough for a reader to find it, never a secret. */

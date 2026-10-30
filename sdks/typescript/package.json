@@ -1,0 +1,29 @@
+{
+  "name": "@dosu-ai/sessiondb",
+  "version": "0.1.1",
+  "description": "The sessiondb SDK: redact, normalize and store coding-agent sessions in the sessionstorage layout, and read them back. The server is a thin HTTP wrapper around this package.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "github:dosu-ai/sessiondb",
+    "directory": "sdks/typescript"
+  },
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "!src/**/*.test.ts"
+  ],
+  "scripts": {
+    "fixtures": "bun run scripts/fixtures.ts",
+    "goldens": "bun run scripts/goldens.ts"
+  },
+  "dependencies": {
+    "@letta-ai/trajectory": "^0.3.0"
+  },
+  "engines": {
+    "bun": ">=1.3"
+  }
+}

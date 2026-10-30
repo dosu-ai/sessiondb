@@ -18,7 +18,7 @@ import {
   tombstone,
 } from "./ingest";
 
-const GOLDENS = join(import.meta.dirname, "..", "..", "testdata", "goldens");
+const GOLDENS = join(import.meta.dirname, "..", "..", "..", "..", "spec", "testdata", "goldens");
 const records = (name: string): NormalizedRecord[] =>
   JSON.parse(readFileSync(join(GOLDENS, `${name}.records.json`), "utf8"));
 const expectedHash = (name: string): string =>

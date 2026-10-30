@@ -1,25 +1,25 @@
 {
-  "name": "sessiondb",
-  "version": "0.1.1",
+  "name": "sessiondb-workspace",
   "private": true,
-  "description": "The sessiondb server: coding-agent sessions as a durable, redacted, content-addressed store. Clients upload raw transcripts with a token; the server normalizes, redacts and writes them to the owner's S3 / R2 bucket.",
+  "description": "sessiondb: coding-agent sessions as a durable, redacted, content-addressed store. The TypeScript SDK (sdks/typescript), the server that wraps it (server), and the contract both honour (spec).",
   "license": "MIT",
   "repository": "github:dosu-ai/sessiondb",
   "type": "module",
+  "workspaces": [
+    "sdks/typescript",
+    "server"
+  ],
   "scripts": {
-    "start": "bun run src/main.ts",
-    "dev": "bun --watch run src/main.ts",
+    "start": "bun run --cwd server start",
+    "dev": "bun run --cwd server dev",
     "test": "bun --bun vitest run",
     "test:watch": "bun --bun vitest",
     "typecheck": "bunx tsc --noEmit",
     "lint": "bunx biome lint .",
     "format": "bunx biome format --write .",
     "check": "bunx biome check .",
-    "fixtures": "bun run scripts/fixtures.ts",
-    "goldens": "bun run scripts/goldens.ts"
-  },
-  "dependencies": {
-    "@letta-ai/trajectory": "^0.3.0"
+    "fixtures": "bun run --cwd sdks/typescript fixtures",
+    "goldens": "bun run --cwd sdks/typescript goldens"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.0",

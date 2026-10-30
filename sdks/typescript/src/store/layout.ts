@@ -1,4 +1,4 @@
-/** The key layout: the contract between every writer and every reader. See `docs/layout.md`.
+/** The key layout: the contract between every writer and every reader. See `spec/layout.md`.
  *
  * ```
  * sessionstorage.json                                     layout marker

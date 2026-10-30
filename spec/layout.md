@@ -38,8 +38,8 @@ anything else under the prefix, and a writer never puts anything under
   continuation hashes `source + "@" + from_record` in place of `source`: the
   same words at two places in one session are two traces, and a tail sent
   again from the same place is one. The exact derivation of events and `text`
-  is in [`src/trace/parse.ts`](../src/trace/parse.ts), pinned by the goldens
-  in `testdata/goldens/`.
+  is in [`sdks/typescript/src/trace/parse.ts`](../sdks/typescript/src/trace/parse.ts), pinned
+  by the goldens in [`testdata/goldens/`](testdata/goldens/).
 - **stamp** in a change key is RFC 3339 UTC to the millisecond with `-` and
   `:` removed (`20261021T210405.123Z`), so keys sort by time and are valid
   file names everywhere.

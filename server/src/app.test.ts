@@ -1,22 +1,24 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+  archiveId,
+  FsStore,
+  getTrace,
+  gunzipJson,
+  keys,
+  normalizeTranscript,
+  prefixSha256,
+  readMetadata,
+} from "@dosu-ai/sessiondb";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type App, createApp } from "./app";
-import { prefixSha256 } from "./ingest/continuation";
-import { getTrace } from "./ingest/ingest";
-import { normalizeTranscript } from "./normalize";
-import { FsStore } from "./store/fs";
-import { archiveId, keys } from "./store/layout";
-import { gunzipJson, readMetadata } from "./store/publish";
 
 const TOKEN = "sdb_test-token-0123456789abcdef";
 const OTHER = "sdb_other-token-0123456789abcdef";
+const TRANSCRIPTS = join(import.meta.dirname, "../../spec/testdata/transcripts");
 /** The fixture is a greeting-sized session; the server calls those trivial. */
-const SMALL = readFileSync(
-  join(import.meta.dirname, "../testdata/transcripts/claude-basic.claude-code.jsonl"),
-  "utf8",
-);
+const SMALL = readFileSync(join(TRANSCRIPTS, "claude-basic.claude-code.jsonl"), "utf8");
 /** The same session with an answer long enough to be worth storing. */
 const CLAUDE = `${SMALL.trim()}\n${JSON.stringify({
   type: "assistant",
@@ -32,10 +34,7 @@ const CLAUDE = `${SMALL.trim()}\n${JSON.stringify({
 
 /** A Claude Code session in the Datadog Trajectory daemon's on-disk format, finished. */
 const STREAM_SMALL = readFileSync(
-  join(
-    import.meta.dirname,
-    "../testdata/transcripts/datadog-claude-session.datadog-trajectory.jsonl",
-  ),
+  join(TRANSCRIPTS, "datadog-claude-session.datadog-trajectory.jsonl"),
   "utf8",
 );
 const STREAM_SESSION = "0d6f1c2e-7b1a-4c3e-9f2d-5a8b7c6d4e3f";

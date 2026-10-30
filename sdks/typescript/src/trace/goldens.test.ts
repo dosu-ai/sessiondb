@@ -1,6 +1,6 @@
-/** For every golden in `testdata/goldens/`, `parseTrajectory` must still produce the committed
+/** For every golden in `spec/testdata/goldens/`, `parseTrajectory` must still produce the committed
  * `content_hash`, events and trace fields, or reject with `TrajectoryError` where the golden
- * says so. `content_hash` is a layout contract (`docs/layout.md`): a change here is a change
+ * says so. `content_hash` is a layout contract (`spec/layout.md`): a change here is a change
  * every reader sees, so it has to be a deliberate `bun run goldens` and a diff in review. */
 
 import { readdirSync, readFileSync } from "node:fs";
@@ -10,7 +10,7 @@ import { TrajectoryError } from "../schemas/trajectory";
 import { type Expected, expectedOf } from "./goldens";
 import { parseTrajectory } from "./parse";
 
-const GOLDENS = join(import.meta.dirname, "..", "..", "testdata", "goldens");
+const GOLDENS = join(import.meta.dirname, "..", "..", "..", "..", "spec", "testdata", "goldens");
 
 const names = readdirSync(GOLDENS)
   .filter((f) => f.endsWith(".records.json"))

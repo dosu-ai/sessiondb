@@ -21,7 +21,7 @@ const secretAccessKey = process.env.SESSIONDB_TEST_S3_SECRET_KEY;
 const configured =
   Boolean(endpoint && bucket && accessKeyId && secretAccessKey) && typeof Bun !== "undefined";
 
-const GOLDENS = join(import.meta.dirname, "..", "..", "testdata", "goldens");
+const GOLDENS = join(import.meta.dirname, "..", "..", "..", "..", "spec", "testdata", "goldens");
 const records = JSON.parse(readFileSync(join(GOLDENS, "claude-basic.records.json"), "utf8"));
 
 describe("parseS3Url", () => {

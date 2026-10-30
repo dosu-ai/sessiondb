@@ -1,4 +1,4 @@
-/** The two mutable objects in the store and the one append-only one. See `docs/layout.md`.
+/** The two mutable objects in the store and the one append-only one. See `spec/layout.md`.
  *
  * `metadata.json` is the live pointer for one session: what raw parts it has, which trace is its
  * head, which traces it has had, and whether it has been redacted. The raw comes first: a session

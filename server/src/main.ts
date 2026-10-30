@@ -13,12 +13,8 @@
  * - `PORT`                 default 7200
  */
 
+import { assertOwner, ensureLayout, FsStore, probe, S3Store, type Store } from "@dosu-ai/sessiondb";
 import { createApp, type StorageView, type TokenGrant } from "./app";
-import { FsStore } from "./store/fs";
-import { assertOwner } from "./store/layout";
-import { ensureLayout, probe } from "./store/publish";
-import { S3Store } from "./store/s3";
-import type { Store } from "./store/store";
 import { VERSION } from "./version";
 
 function fail(message: string): never {

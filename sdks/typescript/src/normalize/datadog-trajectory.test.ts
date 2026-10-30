@@ -5,7 +5,10 @@ import { normalizeDatadogTrajectory } from "./datadog-trajectory";
 import { normalizeTranscript } from "./index";
 
 const fixture = (name: string) =>
-  readFileSync(join(import.meta.dirname, "..", "..", "testdata", "transcripts", name), "utf8");
+  readFileSync(
+    join(import.meta.dirname, "..", "..", "..", "..", "spec", "testdata", "transcripts", name),
+    "utf8",
+  );
 /** A session file as Trajectory writes it for a session it captured live. */
 const STREAM = fixture("datadog-claude-session.datadog-trajectory.jsonl");
 /** A session as the daemon keeps it on disk after importing a client's own history. */

@@ -1,5 +1,5 @@
 /** trajectory-v1 records → a `Trace`: validate, derive events, hash. The derivation is pinned
- * by `testdata/goldens/` (`goldens.test.ts`), since `content_hash` is a layout contract. One
+ * by `spec/testdata/goldens/` (`goldens.test.ts`), since `content_hash` is a layout contract. One
  * assistant record carrying N `tool_calls` fans out into N `tool_call` events so an excerpt can
  * point at a single call. */
 

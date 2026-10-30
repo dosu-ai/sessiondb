@@ -1,11 +1,11 @@
-/** Writes `testdata/transcripts/<name>.<source>.<ext>`: real-shaped native transcripts for each
+/** Writes `spec/testdata/transcripts/<name>.<source>.<ext>`: real-shaped native transcripts for each
  * harness, the input of `scripts/goldens.ts`. Run with
  * `bun run scripts/fixtures.ts`; the outputs are committed. */
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-const OUT = join(import.meta.dir, "..", "testdata", "transcripts");
+const OUT = join(import.meta.dir, "..", "..", "..", "spec", "testdata", "transcripts");
 mkdirSync(OUT, { recursive: true });
 
 const GITHUB_TOKEN = "ghp_abcdefghijklmnopqrstuvwxyz012345";

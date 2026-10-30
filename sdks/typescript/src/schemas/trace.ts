@@ -1,5 +1,5 @@
 /** `sessionstorage/trace/1`: the immutable, content-addressed object a session's records become.
- * `docs/layout.md` is the contract; `trace/parse.ts` derives the events and `content_hash`. */
+ * `spec/layout.md` is the contract; `trace/parse.ts` derives the events and `content_hash`. */
 
 import type { NormalizedRecord } from "./trajectory";
 
