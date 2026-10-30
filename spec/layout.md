@@ -3,7 +3,7 @@
 The object layout is the contract. Anything that can read objects under a
 prefix — the sessiondb server's own routes, another service, `aws s3 sync` — can read
 a sessionstorage store. (`sessionstorage` names the layout; `sessiondb` is what writes it.)
-The writer today is the `@dosu-ai/sessiondb` SDK, whether run by the sessiondb server or by a
+The writer today is the `@dosu/sessiondb` SDK, whether run by the sessiondb server or by a
 client writing a bucket directly; any other writer must follow the rules below.
 
 ```
@@ -76,7 +76,7 @@ later publish does not overwrite it, whatever differs outside the hash.
     "cwd": "/repo/app", "git_branch": "main", "model": "…",   // from the meta record
     "parent_session_id": "…",                                 // lineage, when known at first publish
     "continuation": { "from_record": 6, "prefix_sha256": "…" },
-    "normalizer": { "name": "@dosu-ai/sessiondb", "version": "0.1.1+trajectory.0.3.0" }
+    "normalizer": { "name": "@dosu/sessiondb", "version": "0.1.1+trajectory.0.3.0" }
   }
 }
 ```

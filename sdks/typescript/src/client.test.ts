@@ -88,7 +88,7 @@ describe("over a store", () => {
 
     const trace = await db.getTrace("claude-code", "sess1");
     expect(trace?.content_hash).toBe(result.content_hash);
-    expect(trace?.metadata.normalizer?.name).toBe("@dosu-ai/sessiondb");
+    expect(trace?.metadata.normalizer?.name).toBe("@dosu/sessiondb");
     expect(await db.getTrace("claude-code", "sess1", result.content_hash)).toEqual(trace);
 
     const page = await db.listSessions();

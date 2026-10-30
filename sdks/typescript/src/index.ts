@@ -1,4 +1,4 @@
-/** `@dosu-ai/sessiondb`: coding-agent sessions as a durable, redacted, content-addressed store.
+/** `@dosu/sessiondb`: coding-agent sessions as a durable, redacted, content-addressed store.
  *
  * `connect()` gives a `SessionDB`: `ingest` a native transcript (redacted, normalized to
  * trajectory-v1, published into the `sessionstorage` layout, `spec/layout.md`), and

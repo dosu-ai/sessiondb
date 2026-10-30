@@ -16,7 +16,7 @@ import {
   StoreError,
   StoreSessionDB,
   type StoreSessionResult,
-} from "@dosu-ai/sessiondb";
+} from "@dosu/sessiondb";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "./app";
 
@@ -216,7 +216,7 @@ describe("the request itself", () => {
       userAgent: "dosu-cli/1.0.0",
     }).me();
     expect(seen[0]?.input).toBe("http://s.test/v1/me");
-    expect(seen[0]?.agent).toMatch(/^@dosu-ai\/sessiondb\/\d/);
+    expect(seen[0]?.agent).toMatch(/^@dosu\/sessiondb\/\d/);
     expect(seen[1]?.agent).toBe("dosu-cli/1.0.0");
   });
 

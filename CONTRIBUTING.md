@@ -17,7 +17,7 @@ The repository is a Bun workspace:
 | Path | What |
 |---|---|
 | `spec/` | The contract: `layout.md` (the object layout), `openapi.yaml` (the HTTP API), and `testdata/` (fixtures and goldens) |
-| `sdks/typescript/` | `@dosu-ai/sessiondb`: redact, normalize, store, read. Everything that is not HTTP |
+| `sdks/typescript/` | `@dosu/sessiondb`: redact, normalize, store, read. Everything that is not HTTP |
 | `server/` | `sessiondb-server`: the HTTP routes and `main.ts`, over the SDK. The `Dockerfile` is here, built from the repository root |
 | `docs/` | `server.md`, the API and configuration reference |
 
@@ -66,3 +66,11 @@ existing tests encode those cases for a reason.
 
 One change per pull request, described in terms of what a user or reader of the bucket sees.
 A commit message says what changed and why; the diff already says how.
+
+Releases are cut by [semantic-release](https://github.com/semantic-release/semantic-release)
+from the commits that land on `main` (`release.config.js`), so the subject line follows
+[Conventional Commits](https://www.conventionalcommits.org/): `fix(redact): …` releases a patch,
+`feat(sdk): …` a minor, a `BREAKING CHANGE:` footer a major. A commit with another shape is not
+seen by the release pipeline at all; it ships with the next one that is. Each release publishes
+`@dosu/sessiondb` to npm and `ghcr.io/dosu-ai/sessiondb` to GHCR at one version, writes
+`CHANGELOG.md`, and tags `vX.Y.Z`; nobody edits a version field by hand.

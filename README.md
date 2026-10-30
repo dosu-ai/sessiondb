@@ -152,12 +152,14 @@ bun run check         # biome lint + format
 bun run goldens       # regenerate spec/testdata/goldens after a deliberate change to hashing or events
 ```
 
-The repository is a Bun workspace: `sdks/typescript/` is `@dosu-ai/sessiondb`, the pipeline
+The repository is a Bun workspace: `sdks/typescript/` is `@dosu/sessiondb`, the pipeline
 (redact, normalize, store, read) with no HTTP in it; `server/` is the HTTP server over it;
 `spec/` is the contract both honour, the layout and the goldens.
 
-Releases are two tags. `vX.Y.Z` (matching `server/package.json`) publishes the server image;
-`sdk-vX.Y.Z` (matching `sdks/typescript/package.json`) publishes `@dosu-ai/sessiondb` to npm.
+A push to `main` with a [Conventional Commit](https://www.conventionalcommits.org/) in it is a
+release: CI picks the version from the commits, publishes `@dosu/sessiondb` to npm and
+`ghcr.io/dosu-ai/sessiondb` at the same version, and tags `vX.Y.Z`. The SDK and the server
+share the version; it is what every trace records as its normalizer and what `/healthz` reports.
 
 `spec/testdata/goldens/` pins the normalized records of every fixture transcript and the
 `content_hash` and events each parses to. The goldens test fails on any change to the hash

@@ -25,10 +25,10 @@ import {
   StoreSessionDB,
   type StoreSessionResult,
   type Upload,
-} from "@dosu-ai/sessiondb";
+} from "@dosu/sessiondb";
 import { VERSION } from "./version";
 
-export type { StorageView } from "@dosu-ai/sessiondb";
+export type { StorageView } from "@dosu/sessiondb";
 
 /** A bearer token and the person it belongs to: the `owners/<owner>/` folder it may use. */
 export interface TokenGrant {

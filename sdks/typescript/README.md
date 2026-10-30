@@ -1,16 +1,16 @@
-# @dosu-ai/sessiondb
+# @dosu/sessiondb
 
 The sessiondb SDK: coding-agent sessions as a durable, redacted, content-addressed archive in a
 bucket you own, written in the [sessionstorage layout](../../spec/layout.md).
 
 ```sh
-bun add @dosu-ai/sessiondb    # or npm install
+bun add @dosu/sessiondb    # or npm install
 ```
 
 One client, two backends:
 
 ```ts
-import { connect } from "@dosu-ai/sessiondb";
+import { connect } from "@dosu/sessiondb";
 
 // Serverless: redact and normalize here, write the bucket with this machine's credential.
 const db = connect({ store: "s3://acme-sessions/archive", owner: "alice" });

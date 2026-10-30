@@ -20,7 +20,7 @@ import {
   probe,
   type StorageView,
   type Store,
-} from "@dosu-ai/sessiondb";
+} from "@dosu/sessiondb";
 import { createApp, type TokenGrant } from "./app";
 import { VERSION } from "./version";
 

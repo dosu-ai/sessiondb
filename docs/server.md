@@ -7,7 +7,7 @@ writes the trace beside it, in the [layout](../spec/layout.md). Storage first, t
 trace can always be remade from the bucket. Anything that reads the layout reads the bucket
 directly: the server is a writer and no reader's dependency.
 
-The server is the `@dosu-ai/sessiondb` SDK (`sdks/typescript/`) behind HTTP and a token list:
+The server is the `@dosu/sessiondb` SDK (`sdks/typescript/`) behind HTTP and a token list:
 each route is a call on the SDK's client, scoped to the owner the token names, and the SDK's
 own HTTP backend (`connect({ server, token })`) speaks this API from the other side. A client
 that holds a bucket credential can run the same SDK against the bucket directly and skip the

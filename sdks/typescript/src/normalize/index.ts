@@ -31,7 +31,7 @@ import { DATADOG_TRAJECTORY, normalizeDatadogTrajectory } from "./datadog-trajec
  * SDK is the normalizer whoever runs it, the server or a client writing the bucket directly;
  * who that was is the layout marker's `created_by`. */
 export const NORMALIZER = {
-  name: "@dosu-ai/sessiondb",
+  name: "@dosu/sessiondb",
   version: `${VERSION}+trajectory.${TRAJECTORY_VERSION}`,
 } as const;
 

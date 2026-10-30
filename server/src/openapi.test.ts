@@ -7,7 +7,7 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FsStore, type Store, StoreError } from "@dosu-ai/sessiondb";
+import { FsStore, type Store, StoreError } from "@dosu/sessiondb";
 import { Ajv2020, type ValidateFunction } from "ajv/dist/2020";
 import addFormats from "ajv-formats";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";

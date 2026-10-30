@@ -91,7 +91,7 @@ export class StoreSessionDB implements SessionDB {
     this.owner = assertOwner(options.owner);
     this.store = options.store;
     this.storage = options.storage ?? { url: options.store.url };
-    this.client = options.client ?? `@dosu-ai/sessiondb/${VERSION}`;
+    this.client = options.client ?? `@dosu/sessiondb/${VERSION}`;
     this.now = options.now ?? (() => new Date());
   }
 
@@ -164,7 +164,7 @@ export interface HttpClientOptions {
    * Default 120 s, the server's own idle timeout. 0 disables. */
   timeoutMs?: number;
   /** Sent as `User-Agent`, so a server's logs say which program uploaded
-   * (`dosu-cli/0.68.5`). Default `@dosu-ai/sessiondb/<version>`. */
+   * (`dosu-cli/0.68.5`). Default `@dosu/sessiondb/<version>`. */
   userAgent?: string;
 }
 
@@ -201,7 +201,7 @@ export class HttpSessionDB implements SessionDB {
     this.fetch = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
     this.gzipFrom = options.gzipFrom ?? 8 * 1024;
     this.timeoutMs = options.timeoutMs ?? 120_000;
-    this.userAgent = options.userAgent ?? `@dosu-ai/sessiondb/${VERSION}`;
+    this.userAgent = options.userAgent ?? `@dosu/sessiondb/${VERSION}`;
   }
 
   private async request(

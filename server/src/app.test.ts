@@ -10,7 +10,7 @@ import {
   normalizeTranscript,
   prefixSha256,
   readMetadata,
-} from "@dosu-ai/sessiondb";
+} from "@dosu/sessiondb";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type App, createApp } from "./app";
 
@@ -197,7 +197,7 @@ describe("sessions", () => {
     );
     // The trace says what normalized it, so a later pass can pick out what to redo.
     expect(trace.metadata.normalizer).toEqual({
-      name: "@dosu-ai/sessiondb",
+      name: "@dosu/sessiondb",
       version: expect.stringMatching(/^\d+\.\d+\.\d+\+trajectory\.\d+\.\d+\.\d+$/),
     });
     const traceText = JSON.stringify(trace);
