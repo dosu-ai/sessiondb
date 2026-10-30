@@ -75,7 +75,8 @@ The chunk is normalized on its own and stored as a continuation of the session's
 server keeps where the log stands, so a large session costs each time only what was appended.
 
 The full API, every environment variable, and the rules for chunks, continuations and forks
-are in [`docs/server.md`](docs/server.md).
+are in [`docs/server.md`](docs/server.md); the API as a document is
+[`spec/openapi.yaml`](spec/openapi.yaml).
 
 ### Datadog Trajectory's format
 

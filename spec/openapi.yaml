@@ -1,0 +1,715 @@
+openapi: 3.1.0
+info:
+  title: sessiondb
+  version: "1"
+  summary: Coding-agent sessions as a durable, redacted, content-addressed archive.
+  description: |
+    The HTTP contract of a sessiondb server, and of the `http` backend in every SDK.
+
+    A client posts the raw transcript of a coding-agent session, whole or in chunks as it
+    grows. The server redacts it, stores it as the session's raw part, normalizes what it
+    stored to Letta trajectory-v1, decides whether it is worth a trace and how much of it is
+    new, and writes the trace beside it in the bucket, in the `sessionstorage` layout
+    (`layout.md` beside this file). Readers do not use this API: they read the bucket.
+
+    Every request but `/healthz` carries `Authorization: Bearer <token>`. A token is bound to
+    one owner and every call is scoped to `owners/<owner>/`. Request bodies may be sent
+    `Content-Encoding: gzip`.
+
+    The TypeScript SDK's `HttpSessionDB` maps the error responses back to the errors its store
+    backend throws: `409 offset_mismatch` to `OffsetMismatch`, `422` to `SessionRejected`,
+    `502` to `StoreError`; everything else is a `ServerError`. A server implementing this
+    document and the SDK over a store must agree on every result; `server/src/http-backend.test.ts`
+    holds them to it, and `server/src/openapi.test.ts` holds the server to this document.
+  license:
+    name: MIT
+    identifier: MIT
+
+servers:
+  - url: http://localhost:7200
+    description: A local server (`bun start`).
+
+security:
+  - bearer: []
+
+tags:
+  - name: health
+  - name: identity
+  - name: sessions
+  - name: changes
+
+paths:
+  /healthz:
+    get:
+      tags: [health]
+      summary: Liveness.
+      operationId: health
+      security: []
+      responses:
+        "200":
+          description: The server is up.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, version]
+                properties:
+                  ok: { const: true }
+                  version:
+                    type: string
+                    description: The server's release.
+              example: { ok: true, version: "0.1.1" }
+
+  /v1/me:
+    get:
+      tags: [identity]
+      summary: Who the token is, and where its sessions go.
+      operationId: me
+      description: |
+        The owner the token is bound to and the bucket the server writes, as a reader would
+        need to know it, so a client can point a reader at it. Never a secret.
+      responses:
+        "200":
+          description: The identity.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Identity" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/sessions:
+    post:
+      tags: [sessions]
+      summary: Store a session, whole or as a chunk.
+      operationId: ingest
+      description: |
+        The transcript is redacted and stored as the session's raw part; that creates the
+        session. It is then normalized and judged:
+
+        - Under 2000 characters of conversation, or no user turn, or nothing answering it, is
+          `trivial`: the raw part stays, no trace is written, and the session has no head.
+        - A session uploaded before writes only its tail when the client sends back `shipped`
+          (the `records_total` and `prefix_sha256` from the last answer) and the session's
+          records still begin with that prefix; otherwise the whole session is written and
+          dedupes by content.
+        - A chunk (`offset` > 0) is the log's bytes from where the server's copy ends (the
+          `bytes_total` of the last answer), whole lines of a `jsonl` log. It is stored as its
+          own raw part, normalized on its own, and written as a continuation of the head.
+
+        `201` when a trace was written, `200` when the content was already there or the
+        session was trivial. `422` is final for that upload; `409` says where to resume from;
+        `502` is the bucket failing and is retryable.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Upload" }
+      responses:
+        "201":
+          description: A trace was written.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Stored" }
+        "200":
+          description: Nothing new was written; the content was already there, or the session is trivial.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IngestResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409":
+          description: |
+            A chunk that does not start where the session's log ends. Nothing is stored; the
+            client resends from `expected`, or from 0 (the whole log) when it no longer has that.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OffsetMismatch" }
+        "422":
+          description: |
+            The transcript cannot be stored, and resending the same bytes cannot succeed.
+            `code` is one of `unsupported_agent`, `too_large` (nothing stored), `empty`,
+            `bad_chunk`, `redacted` (the session was tombstoned), and, after the raw part is
+            stored, `normalize_<code>` or `invalid` (the raw part stays for a later normalizer).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+    get:
+      tags: [sessions]
+      summary: List the owner's sessions.
+      operationId: listSessions
+      description: |
+        Every session's `metadata.json` under the owner, paged by key. A full listing; a
+        reader that wants an index builds its own from the change feed.
+      parameters:
+        - name: after
+          in: query
+          description: The `cursor` of the last page.
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 100 }
+      responses:
+        "200":
+          description: A page of sessions.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionsPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/sessions/{agent}/{session_id}:
+    parameters:
+      - $ref: "#/components/parameters/agent"
+      - $ref: "#/components/parameters/session_id"
+    get:
+      tags: [sessions]
+      summary: The session's pointer.
+      operationId: getSession
+      responses:
+        "200":
+          description: The session's `metadata.json`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionMetadata" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/StorageError" }
+    delete:
+      tags: [sessions]
+      summary: Tombstone the session.
+      operationId: tombstone
+      description: |
+        Remove the session's trace and raw objects, mark its pointer `redacted`, and append a
+        tombstone to the change feed. Irreversible: a later upload of the same session is
+        refused with `422 redacted`. A reader that already copied the trace still has it.
+      responses:
+        "200":
+          description: Removed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [removed]
+                properties:
+                  removed:
+                    type: integer
+                    description: How many objects were deleted.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/sessions/{agent}/{session_id}/trace:
+    parameters:
+      - $ref: "#/components/parameters/agent"
+      - $ref: "#/components/parameters/session_id"
+    get:
+      tags: [sessions]
+      summary: The session's trace.
+      operationId: getTrace
+      parameters:
+        - name: hash
+          in: query
+          description: A specific trace's `content_hash`; the head by default.
+          schema: { type: string }
+      responses:
+        "200":
+          description: The trace.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Trace" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404":
+          description: |
+            `not_found`: no such session, or no trace with that hash. `no_trace`: the session
+            is stored raw only (trivial, or not yet normalized) and has no trace yet.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "410":
+          description: The session was tombstoned; it has no trace and will not again.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/changes:
+    get:
+      tags: [changes]
+      summary: The owner's change feed.
+      operationId: changes
+      description: |
+        One entry per publish or tombstone, in key order; keys are time-stamped, so the feed is
+        a listing after a cursor. Stamps come from the clocks of the machines that uploaded, so
+        a consumer re-reads a lag window behind its cursor and dedupes by key.
+      parameters:
+        - name: after
+          in: query
+          description: The last key already processed.
+          schema: { type: string }
+        - name: since
+          in: query
+          description: Start from this time instead (RFC 3339). Ignored when `after` is given.
+          schema: { type: string, format: date-time }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 100 }
+      responses:
+        "200":
+          description: A page of the feed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChangesPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      description: |
+        A token from the server's `SESSIONDB_TOKENS`, bound to one owner. 16+ characters.
+
+  parameters:
+    agent:
+      name: agent
+      in: path
+      required: true
+      description: The transcript format the session was posted as.
+      schema: { $ref: "#/components/schemas/Agent" }
+    session_id:
+      name: session_id
+      in: path
+      required: true
+      description: The harness's own id for the session.
+      schema: { type: string, minLength: 1 }
+
+  responses:
+    BadRequest:
+      description: |
+        The request is malformed: not JSON, a missing or mistyped field, a bad query value,
+        an unsupported `Content-Encoding`. `code` is one of `bad_json`, `missing_field`,
+        `bad_field`, `bad_query`, `bad_encoding`.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: No token, or not one the server knows. `code` is `unauthorized`.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: No such session for this owner. `code` is `not_found`.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    StorageError:
+      description: The bucket failed. Retryable. `code` is `storage_error`.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Agent:
+      type: string
+      description: |
+        A transcript format, by its trajectory source name: one spelling, since the archive id
+        derives from it. `datadog-trajectory` is a Datadog Trajectory session file, whichever
+        client the daemon captured.
+      enum: [claude-code, codex, cursor, opencode, pi, gemini-cli, datadog-trajectory]
+
+    Owner:
+      type: string
+      description: One path segment; the name a token is bound to, usually a person.
+      pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+
+    Sha256:
+      type: string
+      pattern: "^[0-9a-f]{64}$"
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: Stable, machine-readable; the message is for people.
+            message: { type: string }
+      example:
+        error: { code: "unauthorized", message: "a valid token is required" }
+
+    OffsetMismatch:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, expected]
+          properties:
+            code: { const: offset_mismatch }
+            message: { type: string }
+            expected:
+              type: integer
+              minimum: 0
+              description: Where the session's log ends; the byte offset the client resends from.
+
+    Shipped:
+      type: object
+      description: |
+        What the last answer for this session said: `records_total` as `records`, and
+        `prefix_sha256`. Lets a whole upload of a session already stored ship only its tail.
+      required: [records, prefix_sha256]
+      properties:
+        records: { type: integer, minimum: 0 }
+        prefix_sha256: { $ref: "#/components/schemas/Sha256" }
+
+    Upload:
+      type: object
+      required: [agent, session_id, transcript]
+      properties:
+        agent: { $ref: "#/components/schemas/Agent" }
+        session_id: { type: string, minLength: 1 }
+        transcript:
+          type: string
+          description: |
+            The native log, verbatim: the whole of it (`offset` 0), or the bytes from `offset`
+            on, whole lines. Not blank.
+        format:
+          type: string
+          enum: [jsonl, json]
+          default: jsonl
+          description: How the raw copy is redacted, line by line or as one document (OpenCode exports). A `json` log cannot be chunked.
+        offset:
+          type: integer
+          minimum: 0
+          default: 0
+          description: |
+            Where `transcript` starts in the log. 0 is the whole log and replaces every part
+            stored before; else it must equal the `bytes_total` of the last answer.
+        project:
+          type: string
+          description: The repository, as the client names it (`github.com/acme/widget`).
+        branch:
+          type: string
+          description: The client's best guess; the branch the transcript recorded as it began wins.
+        parent_session_id:
+          type: string
+          description: The session this one was resumed or spawned from.
+        fork_of:
+          type: string
+          description: A fork; the parent whose history this log begins with. Only what was added past it ships, when the parent is stored here.
+        shipped: { $ref: "#/components/schemas/Shipped" }
+      example:
+        agent: claude-code
+        session_id: 8f1c2d3e-…
+        transcript: "{\"type\":\"user\",…}\n{\"type\":\"assistant\",…}\n"
+        project: github.com/acme/widget
+        branch: main
+
+    RawStatus:
+      type: object
+      description: What happened to the raw part this upload carried.
+      required: [status, part]
+      properties:
+        status:
+          type: string
+          enum: [stored, exists]
+          description: "`exists`: the same bytes were already stored as that part."
+        part: { type: integer, minimum: 0 }
+
+    Whole:
+      type: object
+      description: |
+        What the client keeps after any answer: the whole session's record count and prefix
+        hash (its `shipped` for the next whole upload), and how much of the log the server
+        holds (where the next chunk starts).
+      required: [records_total, prefix_sha256, bytes_total, raw]
+      properties:
+        records_total: { type: integer, minimum: 0 }
+        prefix_sha256: { $ref: "#/components/schemas/Sha256" }
+        bytes_total: { type: integer, minimum: 0 }
+        raw: { $ref: "#/components/schemas/RawStatus" }
+
+    Stored:
+      description: A trace was written (`stored`), or the content was already there (`duplicate`).
+      allOf:
+        - $ref: "#/components/schemas/Whole"
+        - type: object
+          required: [status, archive_id, content_hash, session_id, records, events]
+          properties:
+            status:
+              type: string
+              enum: [stored, duplicate]
+            archive_id: { $ref: "#/components/schemas/Sha256" }
+            content_hash: { $ref: "#/components/schemas/Sha256" }
+            session_id: { type: string }
+            records:
+              type: integer
+              description: Records this upload wrote (the tail, for a continuation).
+            events: { type: integer }
+
+    Trivial:
+      description: Stored raw; nothing in it worth a trace, or nothing new in this chunk.
+      allOf:
+        - $ref: "#/components/schemas/Whole"
+        - type: object
+          required: [status]
+          properties:
+            status: { const: trivial }
+
+    IngestResult:
+      oneOf:
+        - $ref: "#/components/schemas/Stored"
+        - $ref: "#/components/schemas/Trivial"
+
+    Identity:
+      type: object
+      required: [owner, storage]
+      properties:
+        owner: { $ref: "#/components/schemas/Owner" }
+        storage: { $ref: "#/components/schemas/StorageView" }
+
+    StorageView:
+      type: object
+      description: Where the sessions go, as a reader would need to know it. Never a secret.
+      required: [url]
+      properties:
+        url:
+          type: string
+          description: "`s3://bucket/prefix`, `r2://bucket/prefix` or `file:///path`."
+        region: { type: string }
+        account_id: { type: string, description: Cloudflare account, for `r2://`. }
+        endpoint: { type: string, description: An S3-compatible endpoint, when not AWS. }
+
+    Continuation:
+      type: object
+      description: This trace is the tail of a session already stored.
+      required: [from_record, prefix_sha256]
+      properties:
+        from_record:
+          type: integer
+          minimum: 0
+          description: Index of the trace's first record in the whole session's records.
+        prefix_sha256:
+          $ref: "#/components/schemas/Sha256"
+          description: Hash of the records before it.
+
+    RawPart:
+      type: object
+      required: [part, format, size, sha256, created_at, offset, length]
+      properties:
+        part: { type: integer, minimum: 0 }
+        format: { type: string, enum: [jsonl, json] }
+        size: { type: integer, description: Bytes as stored (redacted, gzipped). }
+        sha256: { $ref: "#/components/schemas/Sha256" }
+        created_at: { type: string, format: date-time }
+        offset: { type: integer, minimum: 0, description: Where the part starts in the log. }
+        length: { type: integer, minimum: 0, description: The log's bytes it covers, before redaction. }
+
+    SessionTraceRef:
+      type: object
+      required: [content_hash, created_at, records]
+      properties:
+        content_hash: { $ref: "#/components/schemas/Sha256" }
+        created_at: { type: string, format: date-time }
+        records: { type: integer }
+        continuation: { $ref: "#/components/schemas/Continuation" }
+
+    NormalizedState:
+      type: object
+      description: Where a chunked upload stands; what the next chunk continues from.
+      required: [bytes, records, prefix_sha256, hash_state]
+      properties:
+        bytes: { type: integer, minimum: 0, description: Of the log normalized so far; where the next chunk starts. }
+        records: { type: integer, minimum: 0, description: The whole session's, so far. }
+        prefix_sha256: { $ref: "#/components/schemas/Sha256" }
+        hash_state: { type: string, description: The prefix hash mid-stream. }
+
+    SessionMetadata:
+      type: object
+      description: The session's `metadata.json`; the live pointer, as in `layout.md`.
+      required: [schema, owner, archive_id, session_id, agent, status, traces, raw, created_at, updated_at]
+      properties:
+        schema: { const: sessionstorage/metadata/1 }
+        owner: { $ref: "#/components/schemas/Owner" }
+        archive_id: { $ref: "#/components/schemas/Sha256" }
+        session_id: { type: string }
+        agent: { type: string }
+        source:
+          type: string
+          description: What normalized the trace (`datadog-trajectory:claude-code`); absent until one is stored.
+        project: { type: string }
+        branch: { type: string }
+        parent_session_id: { type: string }
+        status: { type: string, enum: [stored, redacted] }
+        head:
+          $ref: "#/components/schemas/Sha256"
+          description: The current trace; absent while raw only, and once redacted.
+        traces:
+          type: array
+          items: { $ref: "#/components/schemas/SessionTraceRef" }
+        raw:
+          type: array
+          items: { $ref: "#/components/schemas/RawPart" }
+        raw_format: { type: string, enum: [jsonl, json] }
+        normalized: { $ref: "#/components/schemas/NormalizedState" }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    SessionsPage:
+      type: object
+      required: [sessions, truncated]
+      properties:
+        sessions:
+          type: array
+          items: { $ref: "#/components/schemas/SessionMetadata" }
+        cursor:
+          type: string
+          description: Pass as `after` for the next page. Absent when the page is empty.
+        truncated: { type: boolean }
+
+    ToolCall:
+      type: object
+      required: [id, name, args]
+      properties:
+        id: { type: string, minLength: 1 }
+        name: { type: string, minLength: 1 }
+        args: { type: string, description: The arguments, as a JSON string. }
+
+    Record:
+      description: |
+        One Letta trajectory-v1 record, as `@letta-ai/trajectory` defines them. The first
+        record of a trace is `meta`; the rest carry a `timestamp`.
+      oneOf:
+        - type: object
+          title: meta
+          required: [role, source]
+          properties:
+            role: { const: meta }
+            source: { type: string, minLength: 1 }
+            cwd: { type: string }
+            git_branch: { type: string }
+            model: { type: string }
+        - type: object
+          title: text
+          required: [role, content, timestamp]
+          properties:
+            role: { type: string, enum: [user, system, observation, reasoning] }
+            content: { type: string }
+            timestamp: { type: string }
+        - type: object
+          title: assistant
+          required: [role, timestamp]
+          properties:
+            role: { const: assistant }
+            content: { type: [string, "null"] }
+            tool_calls:
+              type: array
+              items: { $ref: "#/components/schemas/ToolCall" }
+            timestamp: { type: string }
+        - type: object
+          title: tool
+          required: [role, tool_call_id, content, timestamp]
+          properties:
+            role: { const: tool }
+            tool_call_id: { type: string, minLength: 1 }
+            content: { type: string }
+            timestamp: { type: string }
+            ok: { type: boolean }
+
+    TraceEvent:
+      type: object
+      description: |
+        One unit of a trace. `index` is stable for the object's lifetime; anything that
+        addresses a span of a session does so by index range.
+      required: [index, role, text, timestamp]
+      properties:
+        index: { type: integer, minimum: 0 }
+        role:
+          type: string
+          enum: [user, assistant, tool_call, tool_result, system, observation, reasoning]
+        text: { type: string }
+        timestamp: { type: [string, "null"] }
+        tool_name: { type: string }
+        tool_call_id: { type: string }
+        ok: { type: boolean }
+
+    Trace:
+      type: object
+      description: "`trace.<content_hash>.json.gz`, decoded: immutable and content-addressed, as in `layout.md`."
+      required: [schema, content_hash, source, agent, session_id, started_at, ended_at, records, events, metadata]
+      properties:
+        schema: { const: sessionstorage/trace/1 }
+        content_hash: { $ref: "#/components/schemas/Sha256" }
+        source: { type: string, description: What normalized it (the meta record's `source`). }
+        agent: { type: string, description: What the client posted it as. }
+        project: { type: string }
+        branch: { type: string }
+        session_id: { type: [string, "null"] }
+        started_at: { type: [string, "null"] }
+        ended_at: { type: [string, "null"] }
+        records:
+          type: array
+          items: { $ref: "#/components/schemas/Record" }
+        events:
+          type: array
+          items: { $ref: "#/components/schemas/TraceEvent" }
+        metadata:
+          type: object
+          properties:
+            cwd: { type: string }
+            git_branch: { type: string }
+            model: { type: string }
+            parent_session_id: { type: string }
+            continuation: { $ref: "#/components/schemas/Continuation" }
+            normalizer:
+              type: object
+              required: [name, version]
+              properties:
+                name: { type: string, description: What produced `records`; the SDK. }
+                version: { type: string, description: Its release, with the `@letta-ai/trajectory` it ran as build metadata. }
+          additionalProperties: true
+
+    ChangeEntry:
+      type: object
+      description: One `changes/<stamp>-<hash|tombstone>.json`, as in `layout.md`.
+      required: [schema, kind, at, owner, archive_id, session_id, content_hash]
+      properties:
+        schema: { const: sessionstorage/change/1 }
+        kind: { type: string, enum: [published, tombstone] }
+        at: { type: string, format: date-time }
+        owner: { $ref: "#/components/schemas/Owner" }
+        archive_id: { $ref: "#/components/schemas/Sha256" }
+        session_id: { type: string }
+        content_hash:
+          oneOf:
+            - $ref: "#/components/schemas/Sha256"
+            - type: "null"
+          description: The trace the entry is about; for a tombstone, the head at the time, or null if there was none.
+        continuation: { $ref: "#/components/schemas/Continuation" }
+
+    ChangesPage:
+      type: object
+      required: [entries, truncated]
+      properties:
+        entries:
+          type: array
+          items:
+            type: object
+            required: [key, entry]
+            properties:
+              key:
+                type: string
+                description: The object key; the cursor for everything up to and including it.
+              entry: { $ref: "#/components/schemas/ChangeEntry" }
+        cursor:
+          type: string
+          description: The last key on the page; pass as `after`. Absent when the page is empty.
+        truncated: { type: boolean }

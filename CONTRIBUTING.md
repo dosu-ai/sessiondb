@@ -16,7 +16,7 @@ The repository is a Bun workspace:
 
 | Path | What |
 |---|---|
-| `spec/` | The contract: `layout.md` (the object layout) and `testdata/` (fixtures and goldens) |
+| `spec/` | The contract: `layout.md` (the object layout), `openapi.yaml` (the HTTP API), and `testdata/` (fixtures and goldens) |
 | `sdks/typescript/` | `@dosu-ai/sessiondb`: redact, normalize, store, read. Everything that is not HTTP |
 | `server/` | `sessiondb-server`: the HTTP routes and `main.ts`, over the SDK. The `Dockerfile` is here, built from the repository root |
 | `docs/` | `server.md`, the API and configuration reference |
@@ -37,6 +37,9 @@ service; without them the test skips.
 - Documentation in the same change. `docs/server.md` is the API and configuration reference;
   `spec/layout.md` is the object layout; `.env.example` lists every variable. A change to any
   of those is incomplete without the matching doc edit.
+- A route change is a `spec/openapi.yaml` change. `server/src/openapi.test.ts` validates every
+  response the server gives against the document and fails on a documented status it never
+  observed, so a new status, field or route needs the document and a request in that test.
 
 ## The goldens
 

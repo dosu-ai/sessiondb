@@ -87,6 +87,11 @@ A reader never talks to the server. Give it a read-only credential on the bucket
 
 ## API
 
+The contract is [`spec/openapi.yaml`](../spec/openapi.yaml): every route, body and response,
+with the schemas of the objects they carry. `server/src/openapi.test.ts` holds the server to it
+(every response validated, every documented status observed), so the document and the code
+cannot drift apart. What follows is the same API in prose.
+
 All bodies are JSON unless a route says otherwise. Errors are `{ "error": { "code", "message" } }`.
 Request bodies may be `Content-Encoding: gzip`. Every route but `/healthz` wants
 `Authorization: Bearer <token>`.
