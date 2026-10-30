@@ -156,6 +156,9 @@ The repository is a Bun workspace: `sdks/typescript/` is `@dosu-ai/sessiondb`, t
 (redact, normalize, store, read) with no HTTP in it; `server/` is the HTTP server over it;
 `spec/` is the contract both honour, the layout and the goldens.
 
+Releases are two tags. `vX.Y.Z` (matching `server/package.json`) publishes the server image;
+`sdk-vX.Y.Z` (matching `sdks/typescript/package.json`) publishes `@dosu-ai/sessiondb` to npm.
+
 `spec/testdata/goldens/` pins the normalized records of every fixture transcript and the
 `content_hash` and events each parses to. The goldens test fails on any change to the hash
 derivation, so such a change is a reviewed diff and never an accident. Fixture transcripts are

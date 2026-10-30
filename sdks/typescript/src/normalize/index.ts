@@ -15,9 +15,9 @@
 import {
   normalizeTranscript as letta,
   normalizeToCanonical as lettaCanonical,
+  NORMALIZER_VERSION as TRAJECTORY_VERSION,
   type TranscriptTrajectorySource,
 } from "@letta-ai/trajectory";
-import trajectoryPackage from "@letta-ai/trajectory/package.json";
 import { redactRecords } from "../redact/records";
 import type { NormalizedRecord } from "../schemas/trajectory";
 import { VERSION } from "../version";
@@ -32,7 +32,7 @@ import { DATADOG_TRAJECTORY, normalizeDatadogTrajectory } from "./datadog-trajec
  * who that was is the layout marker's `created_by`. */
 export const NORMALIZER = {
   name: "@dosu-ai/sessiondb",
-  version: `${VERSION}+trajectory.${trajectoryPackage.version}`,
+  version: `${VERSION}+trajectory.${TRAJECTORY_VERSION}`,
 } as const;
 
 /** The native logs `@letta-ai/trajectory` reads, by their trajectory source name. */

@@ -3,6 +3,10 @@
 The sessiondb SDK: coding-agent sessions as a durable, redacted, content-addressed archive in a
 bucket you own, written in the [sessionstorage layout](../../spec/layout.md).
 
+```sh
+bun add @dosu-ai/sessiondb    # or npm install
+```
+
 One client, two backends:
 
 ```ts
@@ -58,7 +62,17 @@ enforced where a laptop cannot skip it, and one line in `SESSIONDB_TOKENS` is a 
 `store` is a `Store` or its URL: `s3://bucket/prefix` (AWS; `S3_ENDPOINT` for MinIO, Backblaze,
 Wasabi…), `r2://bucket/prefix` (Cloudflare; `R2_ACCOUNT_ID`), or `file:///path`. Credentials
 come from the usual `AWS_*` / `R2_*` variables or `credentials` in the options. `openStore(url)`
-is the same resolution on its own. The S3 store runs on Bun today.
+is the same resolution on its own.
+
+## Runtimes
+
+Bun runs the package from its TypeScript source (the `bun` export condition); Node 20+ loads
+the bundled `dist/`. Everything works on both except the S3/R2 store, which is over
+`Bun.S3Client` and throws a `StoreError` saying so under Node; a Node program that wants a
+bucket talks to a sessiondb server for now.
+
+The HTTP backend takes `timeoutMs` (default 120 s per request, 0 to disable), `userAgent`
+(so the server's logs name the program, `dosu-cli/0.68.5`), and `fetch` for tests.
 
 ## Lower down
 

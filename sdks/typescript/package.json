@@ -8,15 +8,38 @@
     "url": "github:dosu-ai/sessiondb",
     "directory": "sdks/typescript"
   },
+  "keywords": [
+    "sessiondb",
+    "sessionstorage",
+    "coding-agent",
+    "claude-code",
+    "cursor",
+    "codex",
+    "trajectory",
+    "redaction"
+  ],
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "bun": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
   },
   "files": [
     "src",
-    "!src/**/*.test.ts"
+    "!src/**/*.test.ts",
+    "!src/**/*.test-utils.ts",
+    "dist"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
+    "build": "bun run scripts/build.ts",
+    "prepack": "bun run build",
     "fixtures": "bun run scripts/fixtures.ts",
     "goldens": "bun run scripts/goldens.ts"
   },
@@ -24,6 +47,7 @@
     "@letta-ai/trajectory": "^0.3.0"
   },
   "engines": {
-    "bun": ">=1.3"
+    "bun": ">=1.3",
+    "node": ">=20"
   }
 }

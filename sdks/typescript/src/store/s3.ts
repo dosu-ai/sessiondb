@@ -55,6 +55,11 @@ export class S3Store implements Store {
   private readonly client: Bun.S3Client;
 
   constructor(options: S3StoreOptions) {
+    if (typeof Bun === "undefined") {
+      throw new StoreError(
+        "the S3 store runs on Bun (it uses Bun.S3Client); under Node, use a sessiondb server",
+      );
+    }
     const scheme = options.scheme ?? (options.accountId ? "r2" : "s3");
     this.bucket = options.bucket;
     this.prefix = (options.prefix ?? "").replace(/^\/+|\/+$/g, "");

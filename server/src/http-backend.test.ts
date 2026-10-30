@@ -13,6 +13,7 @@ import {
   ServerError,
   type SessionDB,
   SessionRejected,
+  StoreError,
   StoreSessionDB,
   type StoreSessionResult,
 } from "@dosu-ai/sessiondb";
@@ -197,5 +198,93 @@ describe("the HTTP backend throws what the pipeline throws", () => {
     const denied = wrong.me();
     await expect(denied).rejects.toBeInstanceOf(ServerError);
     await expect(denied).rejects.toMatchObject({ status: 401, code: "unauthorized" });
+  });
+});
+
+describe("the request itself", () => {
+  it("is a string URL with a User-Agent, the SDK's own unless the program names itself", async () => {
+    const seen: { input: unknown; agent: string | null }[] = [];
+    const capture = (input: string, init?: RequestInit) => {
+      seen.push({ input, agent: new Headers(init?.headers).get("user-agent") });
+      return Promise.resolve(Response.json({ owner: "acme", storage: { url: store.url } }));
+    };
+    await new HttpSessionDB({ server: "http://s.test", token: TOKEN, fetch: capture }).me();
+    await new HttpSessionDB({
+      server: "http://s.test",
+      token: TOKEN,
+      fetch: capture,
+      userAgent: "dosu-cli/1.0.0",
+    }).me();
+    expect(seen[0]?.input).toBe("http://s.test/v1/me");
+    expect(seen[0]?.agent).toMatch(/^@dosu-ai\/sessiondb\/\d/);
+    expect(seen[1]?.agent).toBe("dosu-cli/1.0.0");
+  });
+
+  it("gives up after timeoutMs as a StoreError", async () => {
+    const slow = new HttpSessionDB({
+      server: "http://s.test",
+      token: TOKEN,
+      timeoutMs: 20,
+      fetch: (_input, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+        }),
+    });
+    const late = slow.me();
+    await expect(late).rejects.toBeInstanceOf(StoreError);
+    await expect(late).rejects.toThrow(/cannot reach http:\/\/s.test: .*timed out/i);
+  });
+});
+
+describe("responses that are not the server's", () => {
+  const respond = (status: number, text: string) => (_input: string) =>
+    Promise.resolve(new Response(text, { status }));
+
+  it("a proxy's 502 page is a StoreError by status, its 504 a ServerError", async () => {
+    const down = new HttpSessionDB({
+      server: "http://s.test",
+      token: TOKEN,
+      fetch: respond(502, "<html>bad gateway</html>"),
+    });
+    await expect(down.me()).rejects.toBeInstanceOf(StoreError);
+    await expect(down.me()).rejects.toThrow("HTTP 502");
+    const slow = new HttpSessionDB({
+      server: "http://s.test",
+      token: TOKEN,
+      fetch: respond(504, "timeout"),
+    });
+    await expect(slow.me()).rejects.toMatchObject({
+      status: 504,
+      code: "unknown",
+      message: "HTTP 504",
+    });
+  });
+
+  it("a 200 that is not JSON is bad_response", async () => {
+    const odd = new HttpSessionDB({
+      server: "http://s.test",
+      token: TOKEN,
+      fetch: respond(200, "<html>login</html>"),
+    });
+    await expect(odd.me()).rejects.toMatchObject({ status: 200, code: "bad_response" });
+  });
+});
+
+describe("a 409 that is not an offset mismatch", () => {
+  it("is a ServerError with the server's code", async () => {
+    const db = new HttpSessionDB({
+      server: "http://s.test",
+      token: TOKEN,
+      fetch: () =>
+        Promise.resolve(
+          Response.json(
+            { error: { code: "no_storage", message: "link a bucket" } },
+            { status: 409 },
+          ),
+        ),
+    });
+    const refused = db.ingest({ agent: "claude-code", session_id: "x", transcript: CLAUDE });
+    await expect(refused).rejects.toBeInstanceOf(ServerError);
+    await expect(refused).rejects.toMatchObject({ status: 409, code: "no_storage" });
   });
 });

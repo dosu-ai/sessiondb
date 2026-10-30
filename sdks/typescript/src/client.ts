@@ -149,8 +149,8 @@ export class StoreSessionDB implements SessionDB {
 
 // --- over a server ---------------------------------------------------------------------------
 
-/** The shape of `fetch` the HTTP backend needs: a URL and an init to a `Response`. */
-export type Fetch = (input: URL | string, init?: RequestInit) => Promise<Response>;
+/** The shape of `fetch` the HTTP backend needs: a URL string and an init to a `Response`. */
+export type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
 
 export interface HttpClientOptions {
   /** The server's base URL (`https://sessiondb.example.com`). */
@@ -160,6 +160,12 @@ export interface HttpClientOptions {
   fetch?: Fetch;
   /** Bodies past this many bytes are sent `Content-Encoding: gzip`. Default 8 KiB. */
   gzipFrom?: number;
+  /** Per request; a large transcript can take the server a while to normalize and verify.
+   * Default 120 s, the server's own idle timeout. 0 disables. */
+  timeoutMs?: number;
+  /** Sent as `User-Agent`, so a server's logs say which program uploaded
+   * (`dosu-cli/0.68.5`). Default `@dosu-ai/sessiondb/<version>`. */
+  userAgent?: string;
 }
 
 /** A response the server gave that is not one of the pipeline's own refusals: unauthorized, a
@@ -186,12 +192,16 @@ export class HttpSessionDB implements SessionDB {
   private readonly token: string;
   private readonly fetch: Fetch;
   private readonly gzipFrom: number;
+  private readonly timeoutMs: number;
+  private readonly userAgent: string;
 
   constructor(options: HttpClientOptions) {
     this.server = options.server.replace(/\/+$/, "");
     this.token = options.token;
-    this.fetch = options.fetch ?? globalThis.fetch;
+    this.fetch = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
     this.gzipFrom = options.gzipFrom ?? 8 * 1024;
+    this.timeoutMs = options.timeoutMs ?? 120_000;
+    this.userAgent = options.userAgent ?? `@dosu-ai/sessiondb/${VERSION}`;
   }
 
   private async request(
@@ -203,7 +213,10 @@ export class HttpSessionDB implements SessionDB {
     for (const [key, value] of Object.entries(options.query ?? {})) {
       if (value !== undefined) url.searchParams.set(key, String(value));
     }
-    const headers: Record<string, string> = { authorization: `Bearer ${this.token}` };
+    const headers: Record<string, string> = {
+      authorization: `Bearer ${this.token}`,
+      "user-agent": this.userAgent,
+    };
     let body: BodyInit | undefined;
     if (options.body !== undefined) {
       headers["content-type"] = "application/json";
@@ -217,9 +230,15 @@ export class HttpSessionDB implements SessionDB {
     }
     let response: Response;
     try {
-      response = await this.fetch(url, { method, headers, body });
+      response = await this.fetch(url.toString(), {
+        method,
+        headers,
+        body,
+        ...(this.timeoutMs > 0 ? { signal: AbortSignal.timeout(this.timeoutMs) } : {}),
+      });
     } catch (err) {
-      throw new StoreError(`cannot reach ${this.server}: ${(err as Error).message}`, err);
+      const reason = err instanceof Error ? err.message : String(err);
+      throw new StoreError(`cannot reach ${this.server}: ${reason}`, err);
     }
     const text = await response.text();
     let parsed: unknown = null;
@@ -227,19 +246,23 @@ export class HttpSessionDB implements SessionDB {
       try {
         parsed = JSON.parse(text);
       } catch {
-        throw new ServerError(response.status, "bad_response", `not JSON: ${text.slice(0, 200)}`);
+        // A proxy's own error page is a refusal with no envelope, reported by status alone; a
+        // 2xx that is not JSON is not the server at all.
+        if (response.ok) {
+          throw new ServerError(response.status, "bad_response", `not JSON: ${text.slice(0, 200)}`);
+        }
       }
     }
     return { status: response.status, body: parsed };
   }
 
-  /** A non-2xx response as the error it stands for. */
-  private static refuse(status: number, body: unknown): never {
+  /** A non-2xx response as the error it stands for; `offset` is the chunk's, for a 409. */
+  private static refuse(status: number, body: unknown, offset = 0): never {
     const error = (body as ErrorBody | null)?.error ?? {};
     const code = error.code ?? "unknown";
     const message = error.message ?? `HTTP ${status}`;
     if (status === 409 && code === "offset_mismatch") {
-      throw new OffsetMismatch(-1, error.expected ?? 0);
+      throw new OffsetMismatch(offset, error.expected ?? 0);
     }
     if (status === 422) throw new SessionRejected(code, message);
     if (status === 502) throw new StoreError(message);
@@ -248,11 +271,7 @@ export class HttpSessionDB implements SessionDB {
 
   async ingest(upload: Upload): Promise<StoreSessionResult> {
     const { status, body } = await this.request("POST", "/v1/sessions", { body: upload });
-    if (status === 409) {
-      const error = (body as ErrorBody | null)?.error;
-      throw new OffsetMismatch(upload.offset ?? 0, error?.expected ?? 0);
-    }
-    if (status !== 200 && status !== 201) HttpSessionDB.refuse(status, body);
+    if (status !== 200 && status !== 201) HttpSessionDB.refuse(status, body, upload.offset ?? 0);
     return body as StoreSessionResult;
   }
 
@@ -311,7 +330,7 @@ export class HttpSessionDB implements SessionDB {
 // --- choosing --------------------------------------------------------------------------------
 
 export type ConnectOptions =
-  | { server: string; token: string; fetch?: Fetch }
+  | HttpClientOptions
   | ({
       /** A `Store`, or its URL: `s3://bucket/prefix`, `r2://bucket/prefix`, `file:///path`. */
       store: Store | string;
