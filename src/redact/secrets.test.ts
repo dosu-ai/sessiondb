@@ -166,7 +166,9 @@ describe("redactSecrets", () => {
     it("keeps the backslash of an escaped line break after an unquoted value", () => {
       // The trailing group tolerates escaped quotes (`\"`); a lone backslash is the start of
       // the next escape and must stay.
-      const { text } = redactSecrets(String.raw`{"cmd":"export API_KEY=9f2b8c1d4e5a6f7b8c9d\necho ok"}`);
+      const { text } = redactSecrets(
+        String.raw`{"cmd":"export API_KEY=9f2b8c1d4e5a6f7b8c9d\necho ok"}`,
+      );
 
       expect(text).toBe(String.raw`{"cmd":"export API_KEY=[redacted:credential]\necho ok"}`);
     });
