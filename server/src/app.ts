@@ -4,39 +4,31 @@
  * there, so teammates never see each other's transcripts. A client with a token posts raw
  * transcripts; the server stores them redacted, normalizes them and writes the traces to the
  * bucket in the layout, so the laptop never holds a bucket credential and the bucket never
- * holds an unredacted byte. */
+ * holds an unredacted byte.
+ *
+ * Every route is a `StoreSessionDB` call (the SDK's client over the bucket, one per owner) with
+ * the request read off the wire and the result or error mapped to a status. The SDK's HTTP
+ * backend does the reverse on the other side, so the two are one API with a network in it. */
 
 import { timingSafeEqual } from "node:crypto";
 import {
-  archiveId,
   assertOwner,
-  getSession,
-  getTrace,
-  IngestRejected,
   isSource,
-  listSessions,
   OffsetMismatch,
   type RawFormat,
-  readChanges,
   SessionRejected,
-  type SessionUpload,
   SOURCES,
   type Source,
+  type StorageView,
   type Store,
   StoreError,
+  StoreSessionDB,
   type StoreSessionResult,
-  storeSession,
-  tombstone,
+  type Upload,
 } from "@dosu-ai/sessiondb";
 import { VERSION } from "./version";
 
-/** What `GET /v1/me` says about the bucket: enough for a reader to find it, never a secret. */
-export interface StorageView {
-  url: string;
-  region?: string;
-  account_id?: string;
-  endpoint?: string;
-}
+export type { StorageView } from "@dosu-ai/sessiondb";
 
 /** A bearer token and the person it belongs to: the `owners/<owner>/` folder it may use. */
 export interface TokenGrant {
@@ -174,6 +166,14 @@ export function createApp(options: AppOptions) {
   const now = options.now ?? (() => new Date());
   const routes: Route[] = [];
 
+  /** The SDK over the bucket, scoped to each owner a token names. */
+  const clients = new Map<string, StoreSessionDB>();
+  for (const { owner } of tokens) {
+    if (!clients.has(owner)) {
+      clients.set(owner, new StoreSessionDB({ store, storage, owner, client, now }));
+    }
+  }
+
   function route(method: string, path: string, handler: Handler): void {
     const names: string[] = [];
     const pattern = new RegExp(
@@ -185,12 +185,13 @@ export function createApp(options: AppOptions) {
     routes.push({ method, pattern, names, handler });
   }
 
-  /** The owner the request's token is bound to; every read and write is scoped to it. */
-  function authorize(request: Request): string {
+  /** The client for the owner the request's token is bound to; every read and write goes
+   * through it and is scoped to that owner. */
+  function authorize(request: Request): StoreSessionDB {
     const token = bearer(request);
     const grant = token ? tokens.find((known) => tokensEqual(token, known.token)) : undefined;
     if (!grant) throw new HttpError(401, "unauthorized", "a valid token is required");
-    return grant.owner;
+    return clients.get(grant.owner) as StoreSessionDB;
   }
 
   // --- health -----------------------------------------------------------------
@@ -199,20 +200,17 @@ export function createApp(options: AppOptions) {
 
   // --- identity -----------------------------------------------------------------
 
-  route("GET", "/v1/me", ({ request }) => {
-    const owner = authorize(request);
-    return json({ owner, storage });
-  });
+  route("GET", "/v1/me", async ({ request }) => json(await authorize(request).me()));
 
   // --- sessions ---------------------------------------------------------
 
-  /** The pipeline (`ingest/session.ts`) as a response: 201 for a new trace, 200 for a duplicate
-   * or a trivial session, 422 for a transcript it refuses, 409 for a chunk that does not start
-   * where the session's log ends (`expected` says where it does). */
-  async function stored(upload: SessionUpload): Promise<Response> {
+  /** `ingest` as a response: 201 for a new trace, 200 for a duplicate or a trivial session,
+   * 422 for a transcript it refuses, 409 for a chunk that does not start where the session's
+   * log ends (`expected` says where it does). */
+  async function stored(db: StoreSessionDB, upload: Upload): Promise<Response> {
     let result: StoreSessionResult;
     try {
-      result = await storeSession(upload, { store, client, now });
+      result = await db.ingest(upload);
     } catch (err) {
       if (err instanceof OffsetMismatch) {
         return json(
@@ -221,14 +219,13 @@ export function createApp(options: AppOptions) {
         );
       }
       if (err instanceof SessionRejected) throw new HttpError(422, err.code, err.message);
-      if (err instanceof IngestRejected) throw new HttpError(422, err.code, err.message);
       throw err;
     }
     return json(result, result.status === "stored" ? 201 : 200);
   }
 
   route("POST", "/v1/sessions", async ({ request }) => {
-    const owner = authorize(request);
+    const db = authorize(request);
     const body = await readJson(request);
     const agent = sourceOf(str(body, "agent", true) as string);
     const format = (str(body, "format") ?? "jsonl") as RawFormat;
@@ -249,8 +246,7 @@ export function createApp(options: AppOptions) {
     ) {
       throw new HttpError(400, "bad_field", "shipped needs records and prefix_sha256");
     }
-    return stored({
-      owner,
+    return stored(db, {
       agent,
       session_id: str(body, "session_id", true) as string,
       transcript: str(body, "transcript", true) as string,
@@ -272,19 +268,17 @@ export function createApp(options: AppOptions) {
   });
 
   route("GET", "/v1/sessions", async ({ request, url }) => {
-    const owner = authorize(request);
-    const page = await listSessions(store, owner, {
-      startAfter: url.searchParams.get("after") ?? undefined,
+    const db = authorize(request);
+    const page = await db.listSessions({
+      after: url.searchParams.get("after") ?? undefined,
       limit: intParam(url, "limit", 100, 1000),
     });
     return json(page);
   });
 
   route("GET", "/v1/sessions/:agent/:session_id", async ({ request, params }) => {
-    const owner = authorize(request);
-    const metadata = await getSession(
-      store,
-      owner,
+    const db = authorize(request);
+    const metadata = await db.getSession(
       decodeURIComponent(params.agent as string),
       decodeURIComponent(params.session_id as string),
     );
@@ -293,37 +287,35 @@ export function createApp(options: AppOptions) {
   });
 
   route("GET", "/v1/sessions/:agent/:session_id/trace", async ({ request, params, url }) => {
-    const owner = authorize(request);
+    const db = authorize(request);
     const agent = decodeURIComponent(params.agent as string);
     const sessionId = decodeURIComponent(params.session_id as string);
-    const metadata = await getSession(store, owner, agent, sessionId);
+    // The client answers null for every reason there is no trace; the route says which.
+    const metadata = await db.getSession(agent, sessionId);
     if (!metadata) throw new HttpError(404, "not_found", "no such session");
     if (metadata.status === "redacted") {
       throw new HttpError(410, "redacted", "session was redacted; no trace");
     }
     const hash = url.searchParams.get("hash") ?? metadata.head;
     if (!hash) throw new HttpError(404, "no_trace", "session is stored raw only; no trace yet");
-    const trace = await getTrace(store, owner, archiveId(owner, agent, sessionId), hash);
+    const trace = await db.getTrace(agent, sessionId, hash);
     if (!trace) throw new HttpError(404, "not_found", "no such trace");
     return json(trace);
   });
 
   route("DELETE", "/v1/sessions/:agent/:session_id", async ({ request, params }) => {
-    const owner = authorize(request);
-    const result = await tombstone({
-      store,
-      owner,
-      agent: decodeURIComponent(params.agent as string),
-      session_id: decodeURIComponent(params.session_id as string),
-      now,
-    });
+    const db = authorize(request);
+    const result = await db.tombstone(
+      decodeURIComponent(params.agent as string),
+      decodeURIComponent(params.session_id as string),
+    );
     if (!result) throw new HttpError(404, "not_found", "no such session");
     return json(result);
   });
 
   route("GET", "/v1/changes", async ({ request, url }) => {
-    const owner = authorize(request);
-    const page = await readChanges(store, owner, {
+    const db = authorize(request);
+    const page = await db.changes({
       after: url.searchParams.get("after") ?? undefined,
       since: url.searchParams.get("since") ?? undefined,
       limit: intParam(url, "limit", 100, 1000),

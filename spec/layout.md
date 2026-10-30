@@ -2,8 +2,9 @@
 
 The object layout is the contract. Anything that can read objects under a
 prefix — the sessiondb server's own routes, another service, `aws s3 sync` — can read
-a sessionstorage store. (`sessionstorage` names the layout; `sessiondb` is the server that
-writes it.) The server is the only writer today; any other writer must follow the rules below.
+a sessionstorage store. (`sessionstorage` names the layout; `sessiondb` is what writes it.)
+The writer today is the `@dosu-ai/sessiondb` SDK, whether run by the sessiondb server or by a
+client writing a bucket directly; any other writer must follow the rules below.
 
 ```
 <prefix>/
@@ -75,7 +76,7 @@ later publish does not overwrite it, whatever differs outside the hash.
     "cwd": "/repo/app", "git_branch": "main", "model": "…",   // from the meta record
     "parent_session_id": "…",                                 // lineage, when known at first publish
     "continuation": { "from_record": 6, "prefix_sha256": "…" },
-    "normalizer": { "name": "sessiondb-server", "version": "0.1.0+trajectory.0.3.0" }
+    "normalizer": { "name": "@dosu-ai/sessiondb", "version": "0.1.1+trajectory.0.3.0" }
   }
 }
 ```
@@ -83,9 +84,10 @@ later publish does not overwrite it, whatever differs outside the hash.
 `events[i].index` is stable for the object's lifetime; anything that addresses
 a span of a session does so by event index range.
 
-`metadata.normalizer` names what produced `records`: the server release and, as
+`metadata.normalizer` names what produced `records`: the SDK release and, as
 semver build metadata, the `@letta-ai/trajectory` it ran, so a reader can tell
-which traces an adapter change affected.
+which traces an adapter change affected. It is the same whether the server or a
+client ran the SDK; who wrote the layout is the marker's `created_by`.
 
 ### `metadata.json` — `sessionstorage/metadata/1`
 

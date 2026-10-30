@@ -5,7 +5,14 @@ redacts it and writes it to the bucket as the session's raw part, then normalize
 stored to trajectory-v1, decides whether it is worth a trace and how much of it is new, and
 writes the trace beside it, in the [layout](../spec/layout.md). Storage first, then normalize, so the
 trace can always be remade from the bucket. Anything that reads the layout reads the bucket
-directly: the server is the only writer and no reader's dependency.
+directly: the server is a writer and no reader's dependency.
+
+The server is the `@dosu-ai/sessiondb` SDK (`sdks/typescript/`) behind HTTP and a token list:
+each route is a call on the SDK's client, scoped to the owner the token names, and the SDK's
+own HTTP backend (`connect({ server, token })`) speaks this API from the other side. A client
+that holds a bucket credential can run the same SDK against the bucket directly and skip the
+server; what the server adds is that the laptop holds no bucket credential and redaction is
+not the laptop's to skip.
 
 ```
 client ──POST /v1/sessions (raw transcript, bearer token)──▶ sessiondb server

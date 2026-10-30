@@ -30,16 +30,19 @@ import type { NormalizedRecord } from "../schemas/trajectory";
 import { keys } from "../store/layout";
 import type { Store } from "../store/store";
 import { copiedPrefix, planShipment, type ShippedPrefix } from "./continuation";
+import { IngestRejected, OffsetMismatch, SessionRejected } from "./errors";
 import {
   getSession,
   getTrace,
-  IngestRejected,
   type IngestResult,
   ingest,
   type PutRawResult,
   putRaw,
   recordNormalized,
 } from "./ingest";
+
+export { OffsetMismatch, SessionRejected } from "./errors";
+
 import { PrefixHash } from "./prefix-hash";
 import { isTrivialTrajectory } from "./worthiness";
 
@@ -81,31 +84,6 @@ type NormalizeStoredResult =
   ({ status: "trivial" } & Whole) | (IngestResult & Whole);
 
 export type StoreSessionResult = NormalizeStoredResult & { raw: PutRawResult };
-
-/** A transcript the normalizer refuses: nothing in it, or not readable by the adapter. The raw
- * part is stored either way; `code` is what the server reports. */
-export class SessionRejected extends Error {
-  constructor(
-    readonly code: string,
-    message: string,
-  ) {
-    super(message);
-    this.name = "SessionRejected";
-  }
-}
-
-/** A chunk that does not start where the session's log ends: nothing is stored. The client
- * resumes from `expected` (0 when the session has no chunk state: it sends the whole log). */
-export class OffsetMismatch extends Error {
-  readonly code = "offset_mismatch";
-  constructor(
-    readonly offset: number,
-    readonly expected: number,
-  ) {
-    super(`chunk starts at byte ${offset}; the session's log ends at ${expected}`);
-    this.name = "OffsetMismatch";
-  }
-}
 
 /** A recorded branch name, or undefined for the detached (`HEAD`) and empty values agents
  * record. */

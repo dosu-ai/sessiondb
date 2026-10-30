@@ -13,8 +13,15 @@
  * - `PORT`                 default 7200
  */
 
-import { assertOwner, ensureLayout, FsStore, probe, S3Store, type Store } from "@dosu-ai/sessiondb";
-import { createApp, type StorageView, type TokenGrant } from "./app";
+import {
+  assertOwner,
+  ensureLayout,
+  openStore,
+  probe,
+  type StorageView,
+  type Store,
+} from "@dosu-ai/sessiondb";
+import { createApp, type TokenGrant } from "./app";
 import { VERSION } from "./version";
 
 function fail(message: string): never {
@@ -55,25 +62,10 @@ const client = `sessiondb-server/${VERSION}`;
 
 let store: Store;
 let storage: StorageView;
-if (url.startsWith("file://") || url.startsWith("/")) {
-  store = new FsStore(url);
-  storage = { url: store.url };
-} else if (/^(s3|r2):\/\//.test(url)) {
-  const region = process.env.AWS_REGION ?? process.env.S3_REGION;
-  const accountId = process.env.R2_ACCOUNT_ID;
-  const endpoint = process.env.S3_ENDPOINT;
-  if (url.startsWith("r2://") && !accountId && !endpoint) {
-    fail("r2:// needs R2_ACCOUNT_ID (or S3_ENDPOINT)");
-  }
-  store = S3Store.fromUrl(url, { region, accountId, endpoint });
-  storage = {
-    url,
-    ...(region ? { region } : {}),
-    ...(accountId ? { account_id: accountId } : {}),
-    ...(endpoint ? { endpoint } : {}),
-  };
-} else {
-  fail(`SESSIONDB_STORE_URL must be s3://, r2:// or file://, got ${url}`);
+try {
+  ({ store, storage } = openStore(url));
+} catch (err) {
+  fail(err instanceof Error ? err.message : String(err));
 }
 
 // Fail at boot, not on the first session, when the bucket or its keys are wrong.

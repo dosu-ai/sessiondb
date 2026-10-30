@@ -197,7 +197,7 @@ describe("sessions", () => {
     );
     // The trace says what normalized it, so a later pass can pick out what to redo.
     expect(trace.metadata.normalizer).toEqual({
-      name: "sessiondb-server",
+      name: "@dosu-ai/sessiondb",
       version: expect.stringMatching(/^\d+\.\d+\.\d+\+trajectory\.\d+\.\d+\.\d+$/),
     });
     const traceText = JSON.stringify(trace);

@@ -29,7 +29,10 @@ import {
 } from "../store/publish";
 import type { Store } from "../store/store";
 import { parseTrajectory } from "../trace/parse";
+import { IngestRejected } from "./errors";
 import { LIMITS } from "./limits";
+
+export { IngestRejected } from "./errors";
 
 export interface IngestMetadata {
   session_id: string;
@@ -62,17 +65,6 @@ export interface IngestResult {
   session_id: string;
   records: number;
   events: number;
-}
-
-/** A session the store will not take; a 422, not a retry. */
-export class IngestRejected extends Error {
-  constructor(
-    readonly code: "too_large" | "invalid" | "redacted",
-    message: string,
-  ) {
-    super(message);
-    this.name = "IngestRejected";
-  }
 }
 
 function byteLength(value: unknown): number {

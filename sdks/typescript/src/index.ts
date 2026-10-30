@@ -1,19 +1,37 @@
 /** `@dosu-ai/sessiondb`: coding-agent sessions as a durable, redacted, content-addressed store.
  *
- * The write path is `storeSession`: redact a native transcript, store it as a raw part of the
- * session, normalize what was stored to trajectory-v1, decide what is new, and publish the
- * trace into the `sessionstorage` layout (`spec/layout.md`). The read path is `getSession`,
- * `getTrace`, `listSessions` and `readChanges` over the same layout. Both go through a `Store`:
- * a folder (`FsStore`) or a bucket (`S3Store`: AWS S3, Cloudflare R2, anything S3-compatible).
+ * `connect()` gives a `SessionDB`: `ingest` a native transcript (redacted, normalized to
+ * trajectory-v1, published into the `sessionstorage` layout, `spec/layout.md`), and
+ * `getSession`, `getTrace`, `listSessions`, `changes` to read the layout back. Two backends
+ * behind the one interface: a `Store` written directly (a folder, or a bucket on S3, R2 or
+ * anything S3-compatible: serverless), or a sessiondb server that runs this same package
+ * against the bucket it holds.
  *
- * The sessiondb server is this package behind HTTP and a token list; nothing here knows about
- * HTTP. */
+ * Below the client, the pipeline (`storeSession` and the read functions over a `Store`), the
+ * normalizer and the redactor are exported for a caller that wants the pieces. */
 
+// The client: one API over a store (serverless) or a server.
+export {
+  type ConnectOptions,
+  connect,
+  type Fetch,
+  type HttpClientOptions,
+  HttpSessionDB,
+  type Identity,
+  type ListSessionsOptions,
+  ServerError,
+  type SessionDB,
+  type SessionsPage,
+  type StoreClientOptions,
+  StoreSessionDB,
+  type Upload,
+} from "./client";
+// The pipeline, for a caller that wants it without the client.
 export { prefixSha256, type ShippedPrefix } from "./ingest/continuation";
+export { IngestRejected, OffsetMismatch, SessionRejected } from "./ingest/errors";
 export {
   getSession,
   getTrace,
-  IngestRejected,
   type IngestResult,
   listSessions,
   type PutRawResult,
@@ -21,11 +39,8 @@ export {
   tombstone,
 } from "./ingest/ingest";
 export { LIMITS } from "./ingest/limits";
-// The pipeline.
 export {
-  OffsetMismatch,
   type SessionOptions,
-  SessionRejected,
   type SessionUpload,
   type StoreSessionResult,
   storeSession,
@@ -71,6 +86,7 @@ export { TrajectoryError, validateRecords } from "./schemas/trajectory";
 export { type ChangesPage, type ReadChangesOptions, readChanges } from "./store/changes";
 export { FsStore } from "./store/fs";
 export { archiveId, assertOwner, changeStamp, keys, LAYOUT_KEY } from "./store/layout";
+export { isStoreUrl, type OpenStoreOptions, openStore, type StorageView } from "./store/open";
 export {
   decodeJson,
   ensureLayout,

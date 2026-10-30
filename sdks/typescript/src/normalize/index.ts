@@ -25,11 +25,13 @@ import { markClaudeInputs, markedAsObservations } from "./claude-inputs";
 import { subagentReportsAsObservations, withoutInheritedHistory } from "./codex-rollout";
 import { DATADOG_TRAJECTORY, normalizeDatadogTrajectory } from "./datadog-trajectory";
 
-/** What a stored trace records as its normalizer: this server's release plus the
+/** What a stored trace records as its normalizer: this SDK's release plus the
  * `@letta-ai/trajectory` it ran, as semver build metadata. Either changing can change the
- * records a transcript normalizes to, so a reader can tell which traces a change affected. */
+ * records a transcript normalizes to, so a reader can tell which traces a change affected. The
+ * SDK is the normalizer whoever runs it, the server or a client writing the bucket directly;
+ * who that was is the layout marker's `created_by`. */
 export const NORMALIZER = {
-  name: "sessiondb-server",
+  name: "@dosu-ai/sessiondb",
   version: `${VERSION}+trajectory.${trajectoryPackage.version}`,
 } as const;
 
