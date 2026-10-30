@@ -16,25 +16,44 @@ export interface RedactionResult {
 }
 
 const awsAccessKeyRE = /A(?:KIA|SIA)[0-9A-Z]{16}/g;
-const awsSecretRE =
-  /\b(aws[_-]?secret[_-]?access[_-]?key)(\\*['"]?\s*[:=]\s*)(\\*['"]?)([A-Za-z0-9/+=_-]{32,})(\\*['"]?)/gi;
+// A key name starts a word, or follows an escaped line break: in a JSONL transcript (and in a
+// tool call's JSON `args`) every newline inside a string is the two characters `\n`, so an env
+// var at the start of a line reads `\nAWS_SECRET_ACCESS_KEY=` and `\b` sees `n` glued to `A`.
+const keyStart = String.raw`(?<![A-Za-z0-9_])|(?<=\\[nrt])`;
+const awsSecretRE = new RegExp(
+  String.raw`(?:${keyStart})(aws[_-]?secret[_-]?access[_-]?key)(\\*['"]?\s*[:=]\s*)(\\*['"]?)([A-Za-z0-9/+=_-]{32,})((?:\\*['"])?)`,
+  "gi",
+);
 // Matches keys embedded in larger identifiers; the `\\*` runs tolerate the escaped-JSON
 // quotes (`api_key\":`) that agents paste constantly.
-const genericKVRE =
-  /\b([\w.-]{0,64}?(?:api[_-]?key|secret|token|passwd|password|authorization))(\\*['"]?\s*[:=]\s*)(\\*['"]?)([A-Za-z0-9/+=._-]{16,})(\\*['"]?)/gi;
+const genericKVRE = new RegExp(
+  String.raw`(?:${keyStart})([\w.-]{0,64}?(?:api[_-]?key|secret|token|passwd|password|authorization))(\\*['"]?\s*[:=]\s*)(\\*['"]?)([A-Za-z0-9/+=._-]{16,})((?:\\*['"])?)`,
+  "gi",
+);
 // OAuth session tokens can be shorter than genericKVRE's 16-character floor
 // (Supabase refresh tokens are 12), so a key that names an access, refresh, or id token needs
 // only 8 (`"refresh_token": "abc123def456"`).
-const authTokenKVRE =
-  /\b([\w.-]{0,64}?(?:access|refresh|id)[_-]?token)(\\*['"]?\s*[:=]\s*)(\\*['"]?)([A-Za-z0-9/+=._-]{8,})(\\*['"]?)/gi;
-// Credential env vars can end in plain _KEY (GROQ_KEY); case-sensitive on purpose
-// so lowercase `cache_key:` never matches.
-const envKeyRE =
-  /\b([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*_KEY)(\\*['"]?\s*[:=]\s*)(\\*['"]?)([A-Za-z0-9/+=._-]{16,})(\\*['"]?)/g;
+const authTokenKVRE = new RegExp(
+  String.raw`(?:${keyStart})([\w.-]{0,64}?(?:access|refresh|id)[_-]?token)(\\*['"]?\s*[:=]\s*)(\\*['"]?)([A-Za-z0-9/+=._-]{8,})((?:\\*['"])?)`,
+  "gi",
+);
+// Credential env vars can end in plain _KEY (GROQ_KEY) or _KEY_ID (R2_ACCESS_KEY_ID, AWS's
+// AKIA… when it is not in that shape); case-sensitive on purpose so lowercase `cache_key:`
+// never matches.
+const envKeyRE = new RegExp(
+  String.raw`(?:${keyStart})([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*_KEY(?:_ID)?)(\\*['"]?\s*[:=]\s*)(\\*['"]?)([A-Za-z0-9/+=._-]{16,})((?:\\*['"])?)`,
+  "g",
+);
 // The same shape in the languages people actually type in — an English-only
 // list left "пароль: …" in the clear.
 const genericKVIntlRE =
-  /(парол[ьяею]|токен[ауы]?|секрет[ауы]?|ключ[аеиуом]?|contraseña|senha|passwort|密码|密碼|パスワード|비밀번호)(\\*['"]?\s*[:=]\s*)(\\*['"]?)([A-Za-z0-9/+=._-]{16,})(\\*['"]?)/gi;
+  /(парол[ьяею]|токен[ауы]?|секрет[ауы]?|ключ[аеиуом]?|contraseña|senha|passwort|密码|密碼|パスワード|비밀번호)(\\*['"]?\s*[:=]\s*)(\\*['"]?)([A-Za-z0-9/+=._-]{16,})((?:\\*['"])?)/gi;
+// A credential shown the way a console shows it: the label on one line, the value alone on
+// the next ("Secret Access Key\n93b6…"), no assignment anywhere. The value is one token on its
+// own line, so prose under a heading ("API key\nThe key lives in …") never matches; hex is
+// allowed, since that is what access keys are and nothing else here would catch them.
+const labeledLineRE =
+  /((?:^|\n|\\n)[ \t]*(?:secret[ _-]?access[ _-]?key|access[ _-]?key[ _-]?id|secret[ _-]?key|api[ _-]?key|token[ _-]?value|access[ _-]?token|client[ _-]?secret|password|secret|token)[ \t]*:?[ \t]*(?:\n|\\n)+[ \t]*)([A-Za-z0-9/+=._-]{16,})(?=[ \t]*(?:\n|\\n|$|["']))/gi;
 const bearerRE = /\b(Bearer|Basic)(\s+)([A-Za-z0-9._~+/=-]{16,})/gi;
 // A secret named in prose and quoted rather than assigned; the required quotes make it
 // safe to be this loose, since an unquoted mention matches nothing.
@@ -61,6 +80,8 @@ const connURLRE = /\b([A-Za-z][A-Za-z0-9+.-]*:\/\/)([^\s/@:]*):([^\s]+)@([^\s]+)
 
 // Cheap substring hints checked first, keeping the regexes off the vast majority
 // of messages, which contain no credentials at all.
+// Labels the labeled-line rule can start from; checked as substrings before the regex runs.
+const labelHints = ["key", "secret", "token", "password"];
 const kvHints = [
   "key",
   "secret",
@@ -259,6 +280,15 @@ export function redactSecrets(text: string): RedactionResult {
   }
   if (s.includes("eyJ")) {
     s = replaceWhole(s, jwtRE, "jwt", counts);
+  }
+  if (containsAny(lower, labelHints)) {
+    s = replaceSubmatch(
+      s,
+      labeledLineRE,
+      "credential",
+      counts,
+      (m) => `${m[1]}[redacted:credential]`,
+    );
   }
   if (kvAssignmentNearby(lower)) {
     const kvRepl = (m: string[]) =>

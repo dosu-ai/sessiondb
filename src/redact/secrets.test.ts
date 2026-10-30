@@ -147,6 +147,63 @@ describe("redactSecrets", () => {
       expect(text).toBe("export GROQ_KEY=[redacted:credential]");
     });
 
+    it("catches a key name glued to an escaped line break, as JSONL transcripts carry it", () => {
+      // Inside a JSON string every newline is the two characters `\n`, so an env var at the
+      // start of a heredoc line is `\nR2_SECRET_ACCESS_KEY=…`: no word boundary before the R.
+      const secret = "93b63e0000000000000000000000000000000000000000000000000000ce0c";
+      const input = String.raw`cat > x.env <<'EOF'\nR2_ACCESS_KEY_ID=19bee4000000000000000000009309\nR2_SECRET_ACCESS_KEY=${secret}\nAWS_SECRET_ACCESS_KEY=${secret}\tapi_key=${secret}\nEOF`;
+
+      const { text, counts } = redactSecrets(input);
+
+      expect(text).not.toContain(secret);
+      expect(text).not.toContain("19bee4");
+      expect(text).toBe(
+        String.raw`cat > x.env <<'EOF'\nR2_ACCESS_KEY_ID=[redacted:credential]\nR2_SECRET_ACCESS_KEY=[redacted:credential]\nAWS_SECRET_ACCESS_KEY=[redacted:aws-secret]\tapi_key=[redacted:credential]\nEOF`,
+      );
+      expect(counts).toEqual({ credential: 3, "aws-secret": 1 });
+    });
+
+    it("keeps the backslash of an escaped line break after an unquoted value", () => {
+      // The trailing group tolerates escaped quotes (`\"`); a lone backslash is the start of
+      // the next escape and must stay.
+      const { text } = redactSecrets(String.raw`{"cmd":"export API_KEY=9f2b8c1d4e5a6f7b8c9d\necho ok"}`);
+
+      expect(text).toBe(String.raw`{"cmd":"export API_KEY=[redacted:credential]\necho ok"}`);
+    });
+
+    it("redacts a value shown alone on the line under its label, as consoles display it", () => {
+      const keyId = "19bee4000000000000000000009309aa";
+      const secret = "93b63e0000000000000000000000000000000000000000000000000000ce0c";
+      const pasted = `Use the following credentials for S3 clients:\nAccess Key ID\n${keyId}\n\nSecret Access Key\n${secret}\n\nEndpoint https://x.r2.cloudflarestorage.com`;
+
+      const plain = redactSecrets(pasted);
+      expect(plain.text).toBe(
+        "Use the following credentials for S3 clients:\nAccess Key ID\n[redacted:credential]\n\nSecret Access Key\n[redacted:credential]\n\nEndpoint https://x.r2.cloudflarestorage.com",
+      );
+      expect(plain.counts).toEqual({ credential: 2 });
+
+      // The same paste inside a JSON string: the newlines are escaped.
+      const escaped = redactSecrets(JSON.stringify({ text: pasted })).text;
+      expect(escaped).not.toContain(keyId);
+      expect(escaped).not.toContain(secret);
+      expect(JSON.parse(escaped)).toEqual({
+        text: "Use the following credentials for S3 clients:\nAccess Key ID\n[redacted:credential]\n\nSecret Access Key\n[redacted:credential]\n\nEndpoint https://x.r2.cloudflarestorage.com",
+      });
+    });
+
+    it("leaves prose under a credential heading alone", () => {
+      const input =
+        "## API key\nThe key is read from Secret Manager at boot.\n\nToken\nRotate it with pulumi config set.";
+
+      expect(redactSecrets(input).text).toBe(input);
+    });
+
+    it("treats *_KEY_ID as a credential name too", () => {
+      const { text } = redactSecrets("R2_ACCESS_KEY_ID=19bee4000000000000000000009309");
+
+      expect(text).toBe("R2_ACCESS_KEY_ID=[redacted:credential]");
+    });
+
     it("leaves lowercase cache_key-style yaml alone", () => {
       const input = "cache_key: build-artifacts-v2";
 
