@@ -27,15 +27,15 @@ from sessiondb import S3Credentials, connect, open_store
 
 opened = open_store(
     "r2://acme-sessions/prod",
-    account_id="…",                            # or endpoint=, for S3-compatible stores
+    account_id="…",  # or endpoint=, for S3-compatible stores
     credentials=S3Credentials("AKIA…", "…"),  # omit to let boto3 find them
 )
 db = connect(store=opened.store, owner="acme")
-db.check()   # lists the prefix and reads sessionstorage.json: a wrong bucket fails here
+db.check()  # lists the prefix and reads sessionstorage.json: a wrong bucket fails here
 
-pointer = db.get_session("claude-code", "8f1c2d3e-…")   # metadata.json, or None
-trace = db.get_trace("claude-code", "8f1c2d3e-…")       # the head trace, or None
-for pointer in db.iter_sessions():                      # a full scan
+pointer = db.get_session("claude-code", "8f1c2d3e-…")  # metadata.json, or None
+trace = db.get_trace("claude-code", "8f1c2d3e-…")  # the head trace, or None
+for pointer in db.iter_sessions():  # a full scan
     ...
 ```
 
@@ -49,12 +49,12 @@ is also what the tests use.
 after a cursor: the last key you processed.
 
 ```python
-cursor = load_cursor()                       # None the first time
+cursor = load_cursor()  # None the first time
 page = db.changes(after=cursor, limit=1000)
 for change in page.entries:
     entry = change.entry
     if entry.kind == "published":
-        trace = db.read_trace(entry.archive_id, entry.content_hash)   # None if tombstoned since
+        trace = db.read_trace(entry.archive_id, entry.content_hash)  # None if tombstoned since
     elif entry.kind == "tombstone":
         forget(entry.archive_id)
     cursor = change.key
@@ -69,7 +69,7 @@ key:
 from sessiondb import lag_start, parse_change_key
 
 at = parse_change_key(cursor).at if cursor else None
-since = lag_start(at, lag=300)                # five minutes behind the cursor
+since = lag_start(at, lag=300)  # five minutes behind the cursor
 for change in db.iter_changes(since=since):
     if already_processed(change.key):
         continue
@@ -88,13 +88,17 @@ consumer that handles one change at a time just reads the trace the entry names.
 from sessiondb import connect
 
 db = connect(server="https://sessiondb.example.com", token="…")
-me = db.me()                      # the owner the token names, and where the sessions go
-page = db.changes(after=cursor)   # the same reads as above, under that owner
+me = db.me()  # the owner the token names, and where the sessions go
+page = db.changes(after=cursor)  # the same reads as above, under that owner
 
-result = db.ingest(agent="claude-code", session_id="…", transcript=open(log).read(),
-                   project="github.com/acme/widget")
-result.status            # "stored" | "duplicate" | "trivial"
-result.shipped           # send back next time, so a grown session ships only its tail
+result = db.ingest(
+    agent="claude-code",
+    session_id="…",
+    transcript=open(log).read(),
+    project="github.com/acme/widget",
+)
+result.status  # "stored" | "duplicate" | "trivial"
+result.shipped  # send back next time, so a grown session ships only its tail
 ```
 
 Refusals come back as the errors the pipeline would raise: `SessionRejected` (422, the same
