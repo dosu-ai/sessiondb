@@ -1,0 +1,22 @@
+{
+  "schema": "sessionstorage/metadata/1",
+  "owner": "acme",
+  "archive_id": "788118e96c070b211f01125ad40848f31154d5fc7c77ca7d6cca39ede32b9673",
+  "session_id": "sess-refactor",
+  "agent": "claude-code",
+  "source": "claude-code",
+  "status": "redacted",
+  "traces": [],
+  "raw": [],
+  "created_at": "2026-10-21T21:04:08.000Z",
+  "updated_at": "2026-10-21T21:04:18.000Z",
+  "project": "github.com/acme/widget",
+  "branch": "main",
+  "raw_format": "jsonl",
+  "normalized": {
+    "bytes": 6704,
+    "records": 17,
+    "prefix_sha256": "0e8a2c63975b284003d1163beed615be2e569f2ba5d5650fbfccc7002194d76f",
+    "hash_state": "17:56877abea90ef5e02298de11c4c38c0afec09906c8be2cebadae5c9997fb2537:5115:2c22726f6c65223a22617373697374616e74222c2274696d657374616d70223a22323032362d30392d30315430303a30373a30352e3030305a227d"
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "schema": "sessionstorage/metadata/1",
+  "owner": "acme",
+  "archive_id": "d318f14c94585cf6d671b405f5560ecca5dda728986f438bb57fa886f7d01aa5",
+  "session_id": "sess-opencode-export",
+  "agent": "opencode",
+  "status": "stored",
+  "traces": [],
+  "raw": [
+    {
+      "part": 0,
+      "format": "json",
+      "size": 621,
+      "sha256": "43260f3edaa52228f4759822071a0e4f56f5634582d05f694257d7e1871bc0cf",
+      "created_at": "2026-10-21T21:04:14.000Z",
+      "offset": 0,
+      "length": 3240
+    }
+  ],
+  "raw_format": "json",
+  "created_at": "2026-10-21T21:04:14.000Z",
+  "updated_at": "2026-10-21T21:04:15.000Z",
+  "normalized": {
+    "bytes": 3240,
+    "records": 6,
+    "prefix_sha256": "a0f5f74f972fdb33472aada43d37ef0f111ffa7dac6cf0fecad02a342419f0dc",
+    "hash_state": "6:8f24e13caa8088f20b3ba8d1044cc2f8db93ba878ed78c38e6b68529663e4efc:751:697374616e74222c2274696d657374616d70223a22323032362d31302d30325431373a35383a35372e3030305a227d"
+  }
+}

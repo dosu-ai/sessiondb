@@ -1,0 +1,57 @@
+{
+  "owner": "acme",
+  "sessions": [
+    {
+      "agent": "claude-code",
+      "session_id": "sess-auth",
+      "archive_id": "62008b1915ccdd90fa966c260071761197de5b742c21c740591efae29dc29a41",
+      "content_hash": "787188ee1d67b03ece0ec31c4ca76c3f479174ba49a702f5f4cc30374563680c",
+      "records": 17,
+      "status": "stored"
+    },
+    {
+      "agent": "claude-code",
+      "session_id": "sess-refactor",
+      "archive_id": "788118e96c070b211f01125ad40848f31154d5fc7c77ca7d6cca39ede32b9673",
+      "content_hash": "2462f3df8017dcafc9f874bd38473952d0afd1e7809d60c26f0c91cc942642cd",
+      "records": 17,
+      "status": "stored",
+      "note": "tombstoned"
+    },
+    {
+      "agent": "claude-code",
+      "session_id": "sess-perf",
+      "archive_id": "c69464f0bf4b3c9c0ae2511c939d23bb9a990c1c727f662c32af108b181a6a28",
+      "content_hash": "c5d1cef5084dd4e3c539aa1ab62a5c6b25ffc87284154afc0d9d7a7166d6f48e",
+      "records": 21,
+      "status": "stored"
+    },
+    {
+      "agent": "claude-code",
+      "session_id": "sess-claude-basic",
+      "archive_id": "",
+      "content_hash": null,
+      "records": 0,
+      "status": "trivial",
+      "note": "raw only"
+    },
+    {
+      "agent": "opencode",
+      "session_id": "sess-opencode-export",
+      "archive_id": "",
+      "content_hash": null,
+      "records": 0,
+      "status": "trivial",
+      "note": "raw only"
+    },
+    {
+      "agent": "claude-code",
+      "session_id": "sess-auth",
+      "archive_id": "62008b1915ccdd90fa966c260071761197de5b742c21c740591efae29dc29a41",
+      "content_hash": "6a55140b30848a8bd66455b6ef7ef90b93bd52e852540d7b01dfa9d8b8b73b38",
+      "records": 13,
+      "status": "stored",
+      "note": "continuation"
+    }
+  ]
+}

@@ -1,0 +1,80 @@
+[project]
+name = "dosu-sessiondb"
+version = "0.2.0"
+description = "Read coding-agent sessions from a sessionstorage bucket (the change feed, pointers, traces), or talk to a sessiondb server. The Python side of @dosu/sessiondb."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+authors = [{ name = "Dosu" }]
+keywords = ["sessiondb", "sessionstorage", "coding-agent", "claude-code", "cursor", "codex", "trajectory"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Typing :: Typed",
+]
+dependencies = ["pydantic>=2.7,<3"]
+
+[project.optional-dependencies]
+# `S3Store`: S3, R2 and S3-compatible endpoints.
+s3 = ["boto3>=1.34"]
+# `connect(server=..., token=...)`: a sessiondb server over HTTP.
+server = ["httpx>=0.27"]
+all = ["dosu-sessiondb[s3,server]"]
+
+[project.urls]
+Homepage = "https://github.com/dosu-ai/sessiondb"
+Repository = "https://github.com/dosu-ai/sessiondb"
+Documentation = "https://github.com/dosu-ai/sessiondb/tree/main/sdks/python"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sessiondb"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/sessiondb", "README.md", "pyproject.toml"]
+
+[dependency-groups]
+dev = [
+  "boto3>=1.34",
+  "boto3-stubs[s3]>=1.34",
+  "httpx>=0.27",
+  "mypy>=1.14",
+  "pytest>=8",
+  "ruff>=0.9",
+]
+
+[tool.uv]
+required-version = ">=0.5"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "ANN", "PTH"]
+ignore = ["ANN401"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ANN", "E501"]
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+plugins = ["pydantic.mypy"]
+files = ["src"]
+
+[[tool.mypy.overrides]]
+module = ["botocore.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

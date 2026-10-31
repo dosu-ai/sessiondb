@@ -78,6 +78,27 @@ The full API, every environment variable, and the rules for chunks, continuation
 are in [`docs/server.md`](docs/server.md); the API as a document is
 [`spec/openapi.yaml`](spec/openapi.yaml).
 
+### Reading the bucket from Python
+
+A consumer (a backend, a poller, a script) does not need the server: the Python SDK reads the
+bucket with a read-only key, or talks to the server with a token. Same layout, same API shapes.
+
+```sh
+pip install 'dosu-sessiondb[s3]'
+```
+
+```python
+from sessiondb import S3Credentials, connect, open_store
+
+store = open_store("r2://acme-sessions/prod", account_id="…", credentials=S3Credentials("…", "…")).store
+db = connect(store=store, owner="acme")
+for change in db.iter_changes(after=cursor):            # the feed, after the last key processed
+    if change.entry.kind == "published":
+        trace = db.read_trace(change.entry.archive_id, change.entry.content_hash)
+```
+
+See [`sdks/python/`](sdks/python/README.md).
+
 ### Datadog Trajectory's format
 
 [Datadog Trajectory](https://github.com/datadog-labs/trajectory) records coding-agent sessions
@@ -154,7 +175,9 @@ bun run goldens       # regenerate spec/testdata/goldens after a deliberate chan
 
 The repository is a Bun workspace: `sdks/typescript/` is `@dosu/sessiondb`, the pipeline
 (redact, normalize, store, read) with no HTTP in it; `server/` is the HTTP server over it;
-`spec/` is the contract both honour, the layout and the goldens.
+`spec/` is the contract both honour, the layout and the goldens. `sdks/python/` is
+`dosu-sessiondb` on PyPI, the reader and the server client in Python (uv, not Bun); its tests
+read a bucket the TypeScript SDK wrote (`bun run scripts/golden-bucket.ts`).
 
 A push to `main` with a [Conventional Commit](https://www.conventionalcommits.org/) in it is a
 release: CI picks the version from the commits, publishes `@dosu/sessiondb` to npm and

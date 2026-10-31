@@ -37,6 +37,55 @@ jobs:
           SESSIONDB_TEST_S3_SECRET_KEY: rustfsadmin
         run: bun --bun vitest run sdks/typescript/src/store/s3.test.ts
 
+  python:
+    runs-on: ubuntu-latest
+    services:
+      s3:
+        image: rustfs/rustfs:latest
+        ports: ["9000:9000"]
+        env:
+          RUSTFS_ACCESS_KEY: rustfsadmin
+          RUSTFS_SECRET_KEY: rustfsadmin
+    defaults:
+      run:
+        working-directory: sdks/python
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --all-extras --frozen
+      - run: uv run ruff check . && uv run ruff format --check .
+      - run: uv run mypy
+      - name: Create the S3 test bucket
+        run: |
+          AWS_ACCESS_KEY_ID=rustfsadmin AWS_SECRET_ACCESS_KEY=rustfsadmin AWS_DEFAULT_REGION=us-east-1 \
+            uv run --with awscli aws --endpoint-url http://127.0.0.1:9000 s3 mb s3://sessiondb-test
+      - run: uv run pytest
+        env:
+          SESSIONDB_TEST_S3_ENDPOINT: http://127.0.0.1:9000
+          SESSIONDB_TEST_S3_BUCKET: sessiondb-test
+          SESSIONDB_TEST_S3_ACCESS_KEY: rustfsadmin
+          SESSIONDB_TEST_S3_SECRET_KEY: rustfsadmin
+      - name: The golden bucket is what the TypeScript SDK writes today
+        working-directory: .
+        run: |
+          corepack enable >/dev/null 2>&1 || true
+          curl -fsSL https://bun.sh/install | bash >/dev/null
+          export PATH="$HOME/.bun/bin:$PATH"
+          bun install --frozen-lockfile
+          bun run scripts/golden-bucket.ts >/dev/null
+          # The keys and hashes must not have moved (the layout, the archive ids, the content
+          # hashes). Object bytes may: a trace records the normalizer's version.
+          stale=$(git status --porcelain -- sdks/python/tests/fixtures/manifest.json; \
+                  git status --porcelain -- sdks/python/tests/fixtures/bucket | grep -E '^(\?\?| D|D )' || true)
+          if [ -n "$stale" ]; then
+            echo "$stale"
+            echo "::error::sdks/python/tests/fixtures is stale: run 'bun run scripts/golden-bucket.ts' and commit" >&2
+            exit 1
+          fi
+      - run: uv build
+
   docker:
     runs-on: ubuntu-latest
     steps:

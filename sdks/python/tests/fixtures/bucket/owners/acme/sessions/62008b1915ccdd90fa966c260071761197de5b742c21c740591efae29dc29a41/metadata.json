@@ -1,0 +1,48 @@
+{
+  "schema": "sessionstorage/metadata/1",
+  "owner": "acme",
+  "archive_id": "62008b1915ccdd90fa966c260071761197de5b742c21c740591efae29dc29a41",
+  "session_id": "sess-auth",
+  "agent": "claude-code",
+  "source": "claude-code",
+  "status": "stored",
+  "head": "6a55140b30848a8bd66455b6ef7ef90b93bd52e852540d7b01dfa9d8b8b73b38",
+  "traces": [
+    {
+      "content_hash": "787188ee1d67b03ece0ec31c4ca76c3f479174ba49a702f5f4cc30374563680c",
+      "created_at": "2026-10-21T21:04:07.000Z",
+      "records": 17
+    },
+    {
+      "content_hash": "6a55140b30848a8bd66455b6ef7ef90b93bd52e852540d7b01dfa9d8b8b73b38",
+      "created_at": "2026-10-21T21:04:17.000Z",
+      "records": 13,
+      "continuation": {
+        "from_record": 17,
+        "prefix_sha256": "72bcc6d0433cf7cbad72c9b90189a402ccc3b67d282e23181c0186756662df6d"
+      }
+    }
+  ],
+  "raw": [
+    {
+      "part": 0,
+      "format": "jsonl",
+      "size": 683,
+      "sha256": "a0466f8efabd4f6a57836917f3a12ba9bcb18c6235d9c2cbb5c89596bb2b157f",
+      "created_at": "2026-10-21T21:04:16.000Z",
+      "offset": 0,
+      "length": 11692
+    }
+  ],
+  "created_at": "2026-10-21T21:04:06.000Z",
+  "updated_at": "2026-10-21T21:04:17.000Z",
+  "project": "github.com/acme/widget",
+  "branch": "main",
+  "raw_format": "jsonl",
+  "normalized": {
+    "bytes": 11692,
+    "records": 29,
+    "prefix_sha256": "4d990ea2ce38b02dd183e65069241ad3c248e04b38df5633f43a35c498e3fbef",
+    "hash_state": "29:3db739c8dcf65a4e9522264b3e1f2bfa64c454e513a1e8d355d8586376461dd7:8941:74616e74222c2274696d657374616d70223a22323032362d30392d30315430303a31333a30352e3030305a227d"
+  }
+}

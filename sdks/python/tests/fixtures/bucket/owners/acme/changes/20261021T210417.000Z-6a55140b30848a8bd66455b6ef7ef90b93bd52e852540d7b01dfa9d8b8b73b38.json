@@ -1,0 +1,13 @@
+{
+  "schema": "sessionstorage/change/1",
+  "kind": "published",
+  "at": "2026-10-21T21:04:17.000Z",
+  "owner": "acme",
+  "archive_id": "62008b1915ccdd90fa966c260071761197de5b742c21c740591efae29dc29a41",
+  "session_id": "sess-auth",
+  "content_hash": "6a55140b30848a8bd66455b6ef7ef90b93bd52e852540d7b01dfa9d8b8b73b38",
+  "continuation": {
+    "from_record": 17,
+    "prefix_sha256": "72bcc6d0433cf7cbad72c9b90189a402ccc3b67d282e23181c0186756662df6d"
+  }
+}

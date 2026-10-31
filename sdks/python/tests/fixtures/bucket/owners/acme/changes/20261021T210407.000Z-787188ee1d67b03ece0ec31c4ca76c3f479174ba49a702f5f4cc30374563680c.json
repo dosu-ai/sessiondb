@@ -1,0 +1,9 @@
+{
+  "schema": "sessionstorage/change/1",
+  "kind": "published",
+  "at": "2026-10-21T21:04:07.000Z",
+  "owner": "acme",
+  "archive_id": "62008b1915ccdd90fa966c260071761197de5b742c21c740591efae29dc29a41",
+  "session_id": "sess-auth",
+  "content_hash": "787188ee1d67b03ece0ec31c4ca76c3f479174ba49a702f5f4cc30374563680c"
+}

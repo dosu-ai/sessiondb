@@ -1,0 +1,39 @@
+{
+  "schema": "sessionstorage/metadata/1",
+  "owner": "acme",
+  "archive_id": "c69464f0bf4b3c9c0ae2511c939d23bb9a990c1c727f662c32af108b181a6a28",
+  "session_id": "sess-perf",
+  "agent": "claude-code",
+  "source": "claude-code",
+  "status": "stored",
+  "head": "c5d1cef5084dd4e3c539aa1ab62a5c6b25ffc87284154afc0d9d7a7166d6f48e",
+  "traces": [
+    {
+      "content_hash": "c5d1cef5084dd4e3c539aa1ab62a5c6b25ffc87284154afc0d9d7a7166d6f48e",
+      "created_at": "2026-10-21T21:04:11.000Z",
+      "records": 21
+    }
+  ],
+  "raw": [
+    {
+      "part": 0,
+      "format": "jsonl",
+      "size": 594,
+      "sha256": "677c8cd1a3ef5747b705608ceb92fa24d6587092f9679ca1ac55e19e0b6112bf",
+      "created_at": "2026-10-21T21:04:10.000Z",
+      "offset": 0,
+      "length": 8320
+    }
+  ],
+  "created_at": "2026-10-21T21:04:10.000Z",
+  "updated_at": "2026-10-21T21:04:11.000Z",
+  "project": "github.com/acme/widget",
+  "branch": "main",
+  "raw_format": "jsonl",
+  "normalized": {
+    "bytes": 8320,
+    "records": 21,
+    "prefix_sha256": "3adcc200b9383bb1a96d8265b19761479a743214a9b47d03086131d82c66979c",
+    "hash_state": "21:9423e67ac4d410823361d05abfc7c88345b21f275276aea676d0d0a08e40efc3:6389:223a22617373697374616e74222c2274696d657374616d70223a22323032362d30392d30315430303a30393a30352e3030305a227d"
+  }
+}

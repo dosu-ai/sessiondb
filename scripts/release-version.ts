@@ -30,3 +30,24 @@ const synced = lock.replace(
 );
 if (synced !== lock) await Bun.write(lockPath, synced);
 console.log(`bun.lock: ${version}`);
+
+// The Python SDK: pyproject.toml, src/sessiondb/version.py and the uv.lock entry for itself.
+const py = join(import.meta.dir, "..", "sdks", "python");
+for (const [file, pattern] of [
+  ["pyproject.toml", /^version = "[^"]+"$/m],
+  ["src/sessiondb/version.py", /^VERSION = "[^"]+"$/m],
+] as const) {
+  const path = join(py, file);
+  const text = await Bun.file(path).text();
+  const next = text.replace(pattern, (line) => line.replace(/"[^"]+"/, `"${version}"`));
+  if (next !== text) await Bun.write(path, next);
+  console.log(`sdks/python/${file}: ${version}`);
+}
+const uvLockPath = join(py, "uv.lock");
+const uvLock = await Bun.file(uvLockPath).text();
+const uvSynced = uvLock.replace(
+  /(\[\[package\]\]\nname = "dosu-sessiondb"\nversion = ")[^"]+(")/,
+  `$1${version}$2`,
+);
+if (uvSynced !== uvLock) await Bun.write(uvLockPath, uvSynced);
+console.log(`sdks/python/uv.lock: ${version}`);

@@ -1,0 +1,29 @@
+{
+  "schema": "sessionstorage/metadata/1",
+  "owner": "acme",
+  "archive_id": "b8dbeefdf6dcce2a97b8b8e943dc15bd58acd397dabd684e86438e267de73604",
+  "session_id": "sess-claude-basic",
+  "agent": "claude-code",
+  "status": "stored",
+  "traces": [],
+  "raw": [
+    {
+      "part": 0,
+      "format": "jsonl",
+      "size": 386,
+      "sha256": "eb3b09a31d23ce699cda6a96e6ab4e448d1bcf9fe0c9061aee6ccf3e6304e49b",
+      "created_at": "2026-10-21T21:04:12.000Z",
+      "offset": 0,
+      "length": 938
+    }
+  ],
+  "raw_format": "jsonl",
+  "created_at": "2026-10-21T21:04:12.000Z",
+  "updated_at": "2026-10-21T21:04:13.000Z",
+  "normalized": {
+    "bytes": 938,
+    "records": 5,
+    "prefix_sha256": "92385f8235075864433d97ffa0cf10a405e5aba1ad8598b3344216588c28ece8",
+    "hash_state": "5:f239b7feb696f2ab077d91b1db22ac057f7d65b9082095728a90189b447f868f:652:47684a6b4c6d4e705172227d"
+  }
+}
