@@ -272,7 +272,9 @@ components:
       type: http
       scheme: bearer
       description: |
-        A token from the server's `SESSIONDB_TOKENS`, bound to one owner. 16+ characters.
+        A token bound to one owner: one listed in the server's `SESSIONDB_TOKENS` (16+
+        characters), or an HS256 JWT signed with its `SESSIONDB_TOKEN_SECRET` whose `sub` is
+        the owner and whose `exp` has not passed.
 
   parameters:
     agent:

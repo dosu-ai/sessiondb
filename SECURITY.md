@@ -24,7 +24,9 @@ it as a vulnerability.
 **A token scopes one person.** Every request is confined to `owners/<name>/` for the name the
 token is bound to. A leaked token exposes that person's archive and lets its holder upload
 under their name; rotate it in `SESSIONDB_TOKENS` and restart. Tokens are compared in
-constant time and must be at least 16 characters.
+constant time and must be at least 16 characters. A signed token (`SESSIONDB_TOKEN_SECRET`)
+is scoped the same way, by the owner in its `sub`; it cannot be struck from a list, so it
+is good until its `exp`, and rotating the secret invalidates every one at once.
 
 **The bucket credential lives only on the server.** Clients never receive it. `GET /v1/me`
 reports the bucket URL and region so a client can tell a reader where to look; it never
