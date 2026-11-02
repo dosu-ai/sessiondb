@@ -1,3 +1,10 @@
+## [0.2.1](https://github.com/dosu-ai/sessiondb/compare/v0.2.0...v0.2.1) (2026-11-02)
+
+
+### Bug Fixes
+
+* **redact:** catch bare Pulumi and Supabase access tokens ([290e992](https://github.com/dosu-ai/sessiondb/commit/290e99234135f9ed93b482afb82090c221b97533))
+
 # [0.2.0](https://github.com/dosu-ai/sessiondb/compare/v0.1.0...v0.2.0) (2026-10-30)
 
 

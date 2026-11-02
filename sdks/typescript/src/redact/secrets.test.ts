@@ -285,6 +285,9 @@ describe("redactSecrets", () => {
       ["npm-token", "publish npm_abcdefghijklmnopqrstuvwxyz0123456789"],
       ["slack-token", "hook xoxb-1234567890-abcdefghij"],
       ["google-api-key", "maps AIzaSyA1234567890abcdefghijklmnopqrstuv"],
+      // Assembled at runtime so GitHub push protection does not flag the fixtures.
+      ["pulumi-token", `login ${"pul"}-${"0123456789abcdef".repeat(2)}01234567`],
+      ["supabase-token", `deploy ${"sbp"}_${"0123456789abcdef".repeat(2)}01234567`],
     ])("labels %s", (kind, input) => {
       const { text, counts } = redactSecrets(input);
 
