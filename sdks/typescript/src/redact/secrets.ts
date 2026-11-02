@@ -65,7 +65,7 @@ const pemPrivateRE =
 // formats (sk-ant-…, sk-proj-…) are covered. `sk_user_` is a per-user key shape whose tail is
 // `secrets.token_urlsafe` output, so it spans '-' and '_'.
 const providerRE =
-  /\b(gh[opsur]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,}|(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}|sk_user_[A-Za-z0-9_-]{8,}|sk-[A-Za-z0-9_-]*[A-Za-z0-9]{20,}|gsk_[A-Za-z0-9]{20,}|xai-[A-Za-z0-9]{20,}|hf_[A-Za-z0-9]{20,}|npm_[A-Za-z0-9]{30,}|xox[bpcs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{30,})\b/g;
+  /\b(gh[opsur]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,}|(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}|sk_user_[A-Za-z0-9_-]{8,}|sk-[A-Za-z0-9_-]*[A-Za-z0-9]{20,}|gsk_[A-Za-z0-9]{20,}|xai-[A-Za-z0-9]{20,}|hf_[A-Za-z0-9]{20,}|npm_[A-Za-z0-9]{30,}|xox[bpcs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{30,}|pul-[0-9a-f]{40}|sbp_[0-9a-f]{40})\b/g;
 // The second alternative drops the leading \b, which would miss a JWT glued to a
 // word character: the `n` of an escaped `\n` in JSON-in-a-string, or URL-encoding's `%3D`.
 // Without the boundary it requires the payload to open with `eyJ` too (both segments are JSON
@@ -120,6 +120,8 @@ const providerHints = [
   "npm_",
   "xox",
   "AIza",
+  "pul-",
+  "sbp_",
 ];
 
 function isWordChar(code: number): boolean {
@@ -216,6 +218,8 @@ function replaceProvider(s: string, counts: RedactionCounts): string {
     else if (v.startsWith("npm_")) kind = "npm-token";
     else if (/^xox[bpcs]-/.test(v)) kind = "slack-token";
     else if (v.startsWith("AIza")) kind = "google-api-key";
+    else if (v.startsWith("pul-")) kind = "pulumi-token";
+    else if (v.startsWith("sbp_")) kind = "supabase-token";
     add(counts, kind, 1);
     return `${REDACTION_MARKER}${kind}]`;
   });
