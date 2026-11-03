@@ -42,8 +42,9 @@ session.
 
 | Variable | Required | Purpose |
 |---|---|---|
-| `SESSIONDB_TOKENS` | one of the two | `name:token` pairs, comma-separated, one per person (`alice:…,bob:…`). The name is the folder their sessions go under, so keep it stable; the token is 16+ characters (`openssl rand -hex 24`) and can be rotated alone |
+| `SESSIONDB_TOKENS` | one of the three | `name:token` pairs, comma-separated, one per person (`alice:…,bob:…`). The name is the folder their sessions go under, so keep it stable; the token is 16+ characters (`openssl rand -hex 24`) and can be rotated alone |
 | `SESSIONDB_TOKEN` | | One token with no name, for a one-person install; its sessions go under `owners/default/` |
+| `SESSIONDB_TOKEN_SECRET` | | For a hosted server with a tenant per user: tokens signed with this secret are accepted too. An HS256 JWT whose `sub` is the owner and whose `exp` is required; whoever shares the secret (Dosu's backend, for its users) mints one per person, and the list above can be empty. 32+ characters (`openssl rand -hex 32`) |
 | `SESSIONDB_STORE_URL` | yes | `r2://bucket/prefix`, `s3://bucket/prefix`, or `file:///path` |
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | for `r2://` | |
 | `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | for `s3://` | Or Bun's `S3_*` equivalents; `S3_ENDPOINT` for MinIO, Backblaze, Wasabi… |
@@ -78,6 +79,15 @@ person, rotate a token; don't rename.
 
 To host several teams, run one container per team, each with its own `.env` and its own
 bucket or prefix. Isolation between teams comes from the deployment, not the code.
+
+To host many people without listing them, set `SESSIONDB_TOKEN_SECRET` and let something that
+knows who they are mint their tokens: a JWT signed with the secret, `sub` the owner's name,
+`exp` when it stops working. The server checks the signature and the expiry and scopes the
+call to `owners/<sub>/` exactly as it would a listed token; the owner's folder comes into
+being with their first session. This is how Dosu's own sessiondb works: the Dosu backend
+mints a token per user at setup, and reads the bucket with its own key. A leaked signed
+token is good until its `exp`; there is no list to strike it from, so issuers should keep
+them short enough to live with that.
 
 ## Readers
 

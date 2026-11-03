@@ -13,6 +13,7 @@ import {
 } from "@dosu/sessiondb";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type App, createApp } from "./app";
+import { signToken } from "./signed-token";
 
 const TOKEN = "sdb_test-token-0123456789abcdef";
 const OTHER = "sdb_other-token-0123456789abcdef";
@@ -147,6 +148,83 @@ describe("auth", () => {
     expect(() => createApp({ store, storage: { url: store.url }, tokens: [] })).toThrow(
       "at least one token",
     );
+  });
+
+  describe("signed tokens", () => {
+    const SECRET = "hosted-secret-0123456789abcdef0123456789abcdef";
+    const AT = new Date("2026-11-01T12:00:00Z");
+    const later = Math.floor(AT.getTime() / 1000) + 3600;
+    const mint = (owner: string, exp = later, secret = SECRET) => signToken(secret, { owner, exp });
+
+    beforeEach(() => {
+      app = createApp({
+        store,
+        storage: { url: store.url },
+        // The hosted shape: no list, every caller carries a token the issuer signed.
+        tokenSecret: SECRET,
+        client: "sessiondb-server/test",
+        now: () => AT,
+      });
+    });
+
+    it("accepts a token the secret signed, as the owner it names", async () => {
+      const res = await call("GET", "/v1/me", { token: mint("u-42") });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ owner: "u-42", storage: { url: store.url } });
+    });
+
+    it("scopes it to that owner's folder, like a listed token", async () => {
+      const stored = await call("POST", "/v1/sessions", {
+        token: mint("u-42"),
+        body: { agent: "claude-code", session_id: "mine", transcript: CLAUDE },
+      });
+      expect(stored.status).toBe(201);
+      expect(
+        await readMetadata(store, "u-42", archiveId("u-42", "claude-code", "mine")),
+      ).toBeTruthy();
+      expect(
+        (await call("GET", "/v1/sessions/claude-code/mine", { token: mint("u-42") })).status,
+      ).toBe(200);
+      expect(
+        (await call("GET", "/v1/sessions/claude-code/mine", { token: mint("u-7") })).status,
+      ).toBe(404);
+    });
+
+    it("refuses an expired token, a foreign signature, a tampered owner, and a token with no expiry", async () => {
+      const expired = mint("u-42", Math.floor(AT.getTime() / 1000));
+      expect((await call("GET", "/v1/me", { token: expired })).status).toBe(401);
+      const foreign = mint("u-42", later, "another-secret-0123456789abcdef0123456789");
+      expect((await call("GET", "/v1/me", { token: foreign })).status).toBe(401);
+      const [header, , signature] = mint("u-42").split(".");
+      const forged = `${header}.${Buffer.from(JSON.stringify({ sub: "u-7", exp: later })).toString("base64url")}.${signature}`;
+      expect((await call("GET", "/v1/me", { token: forged })).status).toBe(401);
+      const noExpiry = `${header}.${Buffer.from(JSON.stringify({ sub: "u-42" })).toString("base64url")}.${signature}`;
+      expect((await call("GET", "/v1/me", { token: noExpiry })).status).toBe(401);
+      expect((await call("GET", "/v1/me", { token: "not.a.jwt" })).status).toBe(401);
+    });
+
+    it("works alongside a listed token, and a listed token is never read as signed", async () => {
+      app = createApp({
+        store,
+        storage: { url: store.url },
+        tokens: [{ token: TOKEN, owner: "acme" }],
+        tokenSecret: SECRET,
+        now: () => AT,
+      });
+      expect(await (await call("GET", "/v1/me", { token: TOKEN })).json()).toMatchObject({
+        owner: "acme",
+      });
+      expect(await (await call("GET", "/v1/me", { token: mint("u-42") })).json()).toMatchObject({
+        owner: "u-42",
+      });
+      expect((await call("GET", "/v1/me", { token: OTHER })).status).toBe(401);
+    });
+
+    it("refuses a short secret", () => {
+      expect(() => createApp({ store, storage: { url: store.url }, tokenSecret: "short" })).toThrow(
+        "32+ characters",
+      );
+    });
   });
 });
 

@@ -5,6 +5,11 @@
  *                          filed under `owners/<name>/` and a token reads only its own. 16+ chars
  * - `SESSIONDB_TOKEN`      one token for a one-person install; its sessions file under
  *                          `owners/default/`
+ * - `SESSIONDB_TOKEN_SECRET`
+ *                          for a hosted server: tokens signed with this secret (HS256 JWT,
+ *                          `sub` the owner, `exp` required) are accepted too, so an issuer
+ *                          that shares it (Dosu's backend) mints one per person and the
+ *                          list above can be empty. 32+ characters
  * - `SESSIONDB_STORE_URL`  where sessions go: `s3://bucket/prefix`, `r2://bucket/prefix`, or
  *                          `file:///path` for one box
  * - bucket credentials     `s3://`: `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` (or `S3_*`),
@@ -22,6 +27,7 @@ import {
   type Store,
 } from "@dosu/sessiondb";
 import { createApp, type TokenGrant } from "./app";
+import { MIN_SECRET_LENGTH } from "./signed-token";
 import { VERSION } from "./version";
 
 function fail(message: string): never {
@@ -45,7 +51,15 @@ for (const entry of (process.env.SESSIONDB_TOKENS ?? "").split(",")) {
   }
   tokens.push({ token: pair.slice(at + 1).trim(), owner });
 }
-if (tokens.length === 0) fail("SESSIONDB_TOKENS (name:token,…) or SESSIONDB_TOKEN is required");
+const tokenSecret = process.env.SESSIONDB_TOKEN_SECRET?.trim() || undefined;
+if (tokens.length === 0 && tokenSecret === undefined) {
+  fail("SESSIONDB_TOKENS (name:token,…), SESSIONDB_TOKEN or SESSIONDB_TOKEN_SECRET is required");
+}
+if (tokenSecret !== undefined && tokenSecret.length < MIN_SECRET_LENGTH) {
+  fail(
+    `SESSIONDB_TOKEN_SECRET must be ${MIN_SECRET_LENGTH}+ characters (try: openssl rand -hex 32)`,
+  );
+}
 for (const { token } of tokens) {
   if (token.length < 16) fail("every token must be 16+ characters (try: openssl rand -hex 24)");
 }
@@ -76,7 +90,7 @@ try {
   fail(`cannot write to ${url}: ${err instanceof Error ? err.message : String(err)}`);
 }
 
-const app = createApp({ store, storage, tokens, client });
+const app = createApp({ store, storage, tokens, tokenSecret, client });
 const port = Number.parseInt(process.env.PORT ?? "7200", 10);
 
 const server = Bun.serve({
@@ -88,8 +102,9 @@ const server = Bun.serve({
   fetch: app.fetch,
 });
 
+const who = [...owners, ...(tokenSecret ? ["whoever holds a signed token"] : [])].join(", ");
 console.log(
-  `sessiondb-server ${VERSION} listening on http://localhost:${server.port}, writing ${url} for ${owners.join(", ")}`,
+  `sessiondb-server ${VERSION} listening on http://localhost:${server.port}, writing ${url} for ${who}`,
 );
 
 function shutdown(): void {

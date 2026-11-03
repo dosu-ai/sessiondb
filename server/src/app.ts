@@ -1,10 +1,11 @@
 /** The HTTP surface: one `fetch(Request) → Response` the tests call directly and `main.ts`
- * serves. One bucket, one token list, both from the environment. Each token names a person,
- * and that person's sessions live under `owners/<name>/`: a token writes there and reads only
- * there, so teammates never see each other's transcripts. A client with a token posts raw
- * transcripts; the server stores them redacted, normalizes them and writes the traces to the
- * bucket in the layout, so the laptop never holds a bucket credential and the bucket never
- * holds an unredacted byte.
+ * serves. One bucket, and the tokens that may use it, both from the environment: a list of
+ * `name:token` pairs, a secret that signed tokens are checked against (`signed-token.ts`), or
+ * both. Each token names a person, and that person's sessions live under `owners/<name>/`: a
+ * token writes there and reads only there, so teammates never see each other's transcripts. A
+ * client with a token posts raw transcripts; the server stores them redacted, normalizes them
+ * and writes the traces to the bucket in the layout, so the laptop never holds a bucket
+ * credential and the bucket never holds an unredacted byte.
  *
  * Every route is a `StoreSessionDB` call (the SDK's client over the bucket, one per owner) with
  * the request read off the wire and the result or error mapped to a status. The SDK's HTTP
@@ -26,6 +27,7 @@ import {
   type StoreSessionResult,
   type Upload,
 } from "@dosu/sessiondb";
+import { MIN_SECRET_LENGTH, verifyToken } from "./signed-token";
 import { VERSION } from "./version";
 
 export type { StorageView } from "@dosu/sessiondb";
@@ -41,7 +43,10 @@ export interface AppOptions {
   store: Store;
   storage: StorageView;
   /** Bearer tokens that may call the API, each bound to one owner. */
-  tokens: TokenGrant[];
+  tokens?: TokenGrant[];
+  /** Signed tokens are accepted too when set: an HS256 JWT whose `sub` is the owner, minted
+   * by whoever else holds this secret. One of `tokens` and `tokenSecret` is required. */
+  tokenSecret?: string;
   /** Identifies this server in layout markers (`sessiondb-server/0.1.0`). */
   client?: string;
   now?: () => Date;
@@ -158,21 +163,32 @@ function tokensEqual(a: string, b: string): boolean {
 
 export function createApp(options: AppOptions) {
   const { store, storage } = options;
-  const tokens = options.tokens
+  const tokens = (options.tokens ?? [])
     .filter((t) => t.token.length > 0)
     .map((t) => ({ token: t.token, owner: assertOwner(t.owner) }));
-  if (tokens.length === 0) throw new Error("at least one token is required");
+  const tokenSecret = options.tokenSecret || undefined;
+  if (tokens.length === 0 && tokenSecret === undefined) {
+    throw new Error("at least one token, or a token secret, is required");
+  }
+  if (tokenSecret !== undefined && tokenSecret.length < MIN_SECRET_LENGTH) {
+    throw new Error(`the token secret must be ${MIN_SECRET_LENGTH}+ characters`);
+  }
   const client = options.client ?? `sessiondb-server/${VERSION}`;
   const now = options.now ?? (() => new Date());
   const routes: Route[] = [];
 
-  /** The SDK over the bucket, scoped to each owner a token names. */
+  /** The SDK over the bucket, scoped to each owner a token names: the listed owners up
+   * front, a signed token's owner the first time it calls. */
   const clients = new Map<string, StoreSessionDB>();
-  for (const { owner } of tokens) {
-    if (!clients.has(owner)) {
-      clients.set(owner, new StoreSessionDB({ store, storage, owner, client, now }));
+  function clientFor(owner: string): StoreSessionDB {
+    let db = clients.get(owner);
+    if (!db) {
+      db = new StoreSessionDB({ store, storage, owner, client, now });
+      clients.set(owner, db);
     }
+    return db;
   }
+  for (const { owner } of tokens) clientFor(owner);
 
   function route(method: string, path: string, handler: Handler): void {
     const names: string[] = [];
@@ -189,9 +205,13 @@ export function createApp(options: AppOptions) {
    * through it and is scoped to that owner. */
   function authorize(request: Request): StoreSessionDB {
     const token = bearer(request);
-    const grant = token ? tokens.find((known) => tokensEqual(token, known.token)) : undefined;
-    if (!grant) throw new HttpError(401, "unauthorized", "a valid token is required");
-    return clients.get(grant.owner) as StoreSessionDB;
+    if (!token) throw new HttpError(401, "unauthorized", "a valid token is required");
+    const grant = tokens.find((known) => tokensEqual(token, known.token));
+    const owner =
+      grant?.owner ??
+      (tokenSecret !== undefined ? verifyToken(tokenSecret, token, now()) : undefined);
+    if (owner === undefined) throw new HttpError(401, "unauthorized", "a valid token is required");
+    return clientFor(owner);
   }
 
   // --- health -----------------------------------------------------------------
