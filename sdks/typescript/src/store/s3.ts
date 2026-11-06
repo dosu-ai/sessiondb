@@ -1,8 +1,11 @@
-/** AWS S3 and Cloudflare R2 as a `Store`, over `Bun.S3Client` (no SDK). `s3://` and `r2://` are
- * two URL schemes over this one class; the scheme only decides how the endpoint and credentials
- * are resolved. Anything S3-compatible (MinIO, Garage) works through `s3://` with an explicit
- * `endpoint`. Requires the Bun runtime. */
+/** AWS S3 and Cloudflare R2 as a `Store`, with no AWS SDK: over `Bun.S3Client` under Bun, and
+ * over `fetch` with SigV4 signing elsewhere (Node), or wherever a `fetch` is passed in. `s3://`
+ * and `r2://` are two URL schemes over this one class; the scheme only decides how the
+ * endpoint and credentials are resolved. Anything S3-compatible (MinIO, Garage) works through
+ * `s3://` with an explicit `endpoint`. */
 
+import type { Fetch } from "../client";
+import { FetchS3Client } from "./s3-fetch";
 import {
   type ListOptions,
   type ListResult,
@@ -32,6 +35,21 @@ export interface S3StoreOptions {
    * `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` are read here. */
   credentials?: S3Credentials;
   scheme?: "s3" | "r2";
+  /** Talk to the bucket through this `fetch` (signed requests) even under Bun. */
+  fetch?: Fetch;
+}
+
+/** The bucket operations `S3Store` needs, on full keys: one shape over both clients. */
+interface S3Backend {
+  get(key: string): Promise<Uint8Array | null>;
+  put(key: string, body: Uint8Array, contentType: string): Promise<void>;
+  stat(key: string): Promise<ObjectStat | null>;
+  delete(key: string): Promise<void>;
+  list(options: {
+    prefix: string;
+    maxKeys: number;
+    startAfter?: string;
+  }): Promise<{ keys: string[]; truncated: boolean }>;
 }
 
 /** Parse `s3://bucket/prefix` / `r2://bucket/prefix`. */
@@ -52,14 +70,9 @@ export class S3Store implements Store {
   readonly url: string;
   readonly bucket: string;
   readonly prefix: string;
-  private readonly client: Bun.S3Client;
+  private readonly client: S3Backend;
 
   constructor(options: S3StoreOptions) {
-    if (typeof Bun === "undefined") {
-      throw new StoreError(
-        "the S3 store runs on Bun (it uses Bun.S3Client); under Node, use a sessiondb server",
-      );
-    }
     const scheme = options.scheme ?? (options.accountId ? "r2" : "s3");
     this.bucket = options.bucket;
     this.prefix = (options.prefix ?? "").replace(/^\/+|\/+$/g, "");
@@ -71,14 +84,19 @@ export class S3Store implements Store {
       (scheme === "r2" && options.accountId
         ? `https://${options.accountId}.r2.cloudflarestorage.com`
         : undefined);
-    this.client = new Bun.S3Client({
-      bucket: this.bucket,
-      region: options.region,
-      endpoint,
-      // R2 and most S3-compatible stores want path-style; AWS virtual-hosted.
-      virtualHostedStyle: endpoint === undefined,
-      ...credentials,
-    });
+    this.client =
+      typeof Bun !== "undefined" && !options.fetch
+        ? bunBackend(
+            new Bun.S3Client({
+              bucket: this.bucket,
+              region: options.region,
+              endpoint,
+              // R2 and most S3-compatible stores want path-style; AWS virtual-hosted.
+              virtualHostedStyle: endpoint === undefined,
+              ...credentials,
+            }),
+          )
+        : fetchBackend(this.bucket, scheme, options, endpoint, credentials);
   }
 
   /** The store from a `s3://` / `r2://` URL plus the per-scheme extras. */
@@ -96,9 +114,7 @@ export class S3Store implements Store {
 
   async get(key: string): Promise<Uint8Array | null> {
     try {
-      const file = this.client.file(this.keyOf(key));
-      if (!(await file.exists())) return null;
-      return new Uint8Array(await file.arrayBuffer());
+      return await this.client.get(this.keyOf(key));
     } catch (err) {
       if (isNotFound(err)) return null;
       throw new StoreError(`read ${key}`, err);
@@ -107,9 +123,11 @@ export class S3Store implements Store {
 
   async put(key: string, body: Uint8Array, options: PutOptions = {}): Promise<void> {
     try {
-      await this.client.write(this.keyOf(key), body, {
-        type: options.contentType ?? "application/octet-stream",
-      });
+      await this.client.put(
+        this.keyOf(key),
+        body,
+        options.contentType ?? "application/octet-stream",
+      );
     } catch (err) {
       throw new StoreError(`write ${key}`, err);
     }
@@ -117,8 +135,7 @@ export class S3Store implements Store {
 
   async stat(key: string): Promise<ObjectStat | null> {
     try {
-      const info = await this.client.stat(this.keyOf(key));
-      return { size: info.size, etag: info.etag.replace(/^"|"$/g, "") };
+      return await this.client.stat(this.keyOf(key));
     } catch (err) {
       if (isNotFound(err)) return null;
       throw new StoreError(`stat ${key}`, err);
@@ -141,14 +158,77 @@ export class S3Store implements Store {
         startAfter: options.startAfter === undefined ? undefined : this.keyOf(options.startAfter),
       });
       const strip = this.prefix ? this.prefix.length + 1 : 0;
-      return {
-        keys: (response.contents ?? []).map((o) => o.key.slice(strip)),
-        truncated: response.isTruncated ?? false,
-      };
+      return { keys: response.keys.map((k) => k.slice(strip)), truncated: response.truncated };
     } catch (err) {
       throw new StoreError(`list ${prefix}`, err);
     }
   }
+}
+
+function bunBackend(client: Bun.S3Client): S3Backend {
+  return {
+    async get(key) {
+      const file = client.file(key);
+      if (!(await file.exists())) return null;
+      return new Uint8Array(await file.arrayBuffer());
+    },
+    async put(key, body, contentType) {
+      await client.write(key, body, { type: contentType });
+    },
+    async stat(key) {
+      const info = await client.stat(key);
+      return { size: info.size, etag: info.etag.replace(/^"|"$/g, "") };
+    },
+    async delete(key) {
+      await client.delete(key);
+    },
+    async list(options) {
+      const response = await client.list(options);
+      return {
+        keys: (response.contents ?? []).map((o) => o.key),
+        truncated: response.isTruncated ?? false,
+      };
+    },
+  };
+}
+
+/** The signed-fetch client, with credentials, region and endpoint resolved from the
+ * environment the way `Bun.S3Client` resolves them. R2 signs with region `auto`. */
+function fetchBackend(
+  bucket: string,
+  scheme: "s3" | "r2",
+  options: S3StoreOptions,
+  endpoint: string | undefined,
+  credentials: Partial<S3Credentials>,
+): S3Backend {
+  const env = process.env;
+  const accessKeyId = credentials.accessKeyId ?? env.S3_ACCESS_KEY_ID ?? env.AWS_ACCESS_KEY_ID;
+  const secretAccessKey =
+    credentials.secretAccessKey ?? env.S3_SECRET_ACCESS_KEY ?? env.AWS_SECRET_ACCESS_KEY;
+  const sessionToken = credentials.sessionToken ?? env.S3_SESSION_TOKEN ?? env.AWS_SESSION_TOKEN;
+  if (!accessKeyId || !secretAccessKey) {
+    throw new StoreError(
+      `${scheme}://${bucket} needs an access key id and secret (credentials, or ${
+        scheme === "r2" ? "R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY" : "AWS_* / S3_*"
+      } in the environment)`,
+    );
+  }
+  const client = new FetchS3Client({
+    bucket,
+    region:
+      options.region ??
+      (scheme === "r2" ? "auto" : (env.S3_REGION ?? env.AWS_REGION ?? "us-east-1")),
+    endpoint: endpoint ?? env.S3_ENDPOINT ?? env.AWS_ENDPOINT,
+    credentials: { accessKeyId, secretAccessKey, ...(sessionToken ? { sessionToken } : {}) },
+    fetch: options.fetch,
+  });
+  return {
+    get: (key) => client.get(key),
+    put: (key, body, contentType) => client.put(key, body, contentType),
+    stat: (key) => client.head(key),
+    delete: (key) => client.delete(key),
+    list: (o) => client.list(o),
+  };
 }
 
 function r2CredentialsFromEnv(): Partial<S3Credentials> {
