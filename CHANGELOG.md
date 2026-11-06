@@ -1,3 +1,10 @@
+# [0.4.0](https://github.com/dosu-ai/sessiondb/compare/v0.3.0...v0.4.0) (2026-11-06)
+
+
+### Features
+
+* **store:** S3 and R2 under Node, over fetch with SigV4 signing ([4b363d5](https://github.com/dosu-ai/sessiondb/commit/4b363d519af174ffe8890743ba5e875148a7a8f5))
+
 # [0.3.0](https://github.com/dosu-ai/sessiondb/compare/v0.2.1...v0.3.0) (2026-11-03)
 
 
