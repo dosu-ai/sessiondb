@@ -67,9 +67,9 @@ is the same resolution on its own.
 ## Runtimes
 
 Bun runs the package from its TypeScript source (the `bun` export condition); Node 20+ loads
-the bundled `dist/`. Everything works on both except the S3/R2 store, which is over
-`Bun.S3Client` and throws a `StoreError` saying so under Node; a Node program that wants a
-bucket talks to a sessiondb server for now.
+the bundled `dist/`. Everything works on both, the S3/R2 store included: under Bun it is over
+`Bun.S3Client`, under Node over `fetch` with SigV4 signing (no AWS SDK). Pass `fetch` in the
+store options to use the signed-fetch client under Bun too.
 
 The HTTP backend takes `timeoutMs` (default 120 s per request, 0 to disable), `userAgent`
 (so the server's logs name the program, `dosu-cli/0.68.5`), and `fetch` for tests.

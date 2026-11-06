@@ -4,6 +4,7 @@
  * variables the server documents (`AWS_REGION`, `R2_ACCOUNT_ID`, `S3_ENDPOINT`); credentials
  * are resolved by `S3Store` (`AWS_*` / `S3_*` / `R2_*`), or passed explicitly. */
 
+import type { Fetch } from "../client";
 import { FsStore } from "./fs";
 import type { S3Credentials } from "./s3";
 import { S3Store } from "./s3";
@@ -22,6 +23,8 @@ export interface OpenStoreOptions {
   accountId?: string;
   endpoint?: string;
   credentials?: S3Credentials;
+  /** Reach the bucket through this `fetch` (signed requests), under any runtime. */
+  fetch?: Fetch;
   /** Where to read the per-scheme extras from when not given; `process.env` by default. */
   env?: Record<string, string | undefined>;
 }
@@ -51,6 +54,7 @@ export function openStore(
       accountId,
       endpoint,
       credentials: options.credentials,
+      fetch: options.fetch,
     });
     return {
       store,
