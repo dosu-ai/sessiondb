@@ -1,3 +1,10 @@
+## [0.4.1](https://github.com/dosu-ai/sessiondb/compare/v0.4.0...v0.4.1) (2026-11-09)
+
+
+### Bug Fixes
+
+* **server:** apply Debian security updates in the image ([87f1a04](https://github.com/dosu-ai/sessiondb/commit/87f1a046a26625315f401fc3189229496b2cd59d))
+
 # [0.4.0](https://github.com/dosu-ai/sessiondb/compare/v0.3.0...v0.4.0) (2026-11-06)
 
 
