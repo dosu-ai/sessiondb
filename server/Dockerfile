@@ -3,6 +3,10 @@
 #   docker build -f server/Dockerfile -t sessiondb .
 FROM oven/bun:1.4-slim
 
+# The base image is rebuilt on Bun's schedule, not Debian's, so take the distro's security
+# fixes at build time: otherwise a release ships packages Debian has already patched.
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 COPY package.json bun.lock ./
 COPY sdks/typescript/package.json ./sdks/typescript/
