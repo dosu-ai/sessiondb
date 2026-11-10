@@ -1,3 +1,15 @@
+# [0.5.0](https://github.com/dosu-ai/sessiondb/compare/v0.4.1...v0.5.0) (2026-11-10)
+
+
+### Bug Fixes
+
+* **sdk:** put ATIF tool errors on the records the adapter links ([628cf5f](https://github.com/dosu-ai/sessiondb/commit/628cf5ffcc30c21769be9a701f4fa85b584901c7))
+
+
+### Features
+
+* **sdk:** accept ATIF documents and keep the harness name ([77462ae](https://github.com/dosu-ai/sessiondb/commit/77462ae1d88e79cd454d2ab296d383185bb6401e))
+
 ## [0.4.1](https://github.com/dosu-ai/sessiondb/compare/v0.4.0...v0.4.1) (2026-11-09)
 
 
