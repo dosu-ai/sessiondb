@@ -654,3 +654,123 @@ function codexMessage(role: string, text: string): Record<string, unknown> {
   };
   write("opencode-export.opencode.json", `${JSON.stringify(doc, null, 2)}\n`);
 }
+
+// --- ATIF -----------------------------------------------------------------------
+
+/** A Claude Code session exported as an ATIF-v1.7 document, the shape Decant writes: a system
+ * step, the user's prompt, an agent step with reasoning and two tool calls (one failed, with
+ * `extra.is_error`), and an agent step that ran a subagent, embedded in
+ * `subagent_trajectories` and referenced from its tool result. */
+{
+  const subagent = {
+    schema_version: "ATIF-v1.7",
+    session_id: "atif-sess1:agent-7f3a",
+    agent: { name: "claude-code", version: "2.1.0", model_name: "claude-haiku-4-5" },
+    steps: [
+      {
+        step_id: 1,
+        timestamp: "2026-11-01T09:00:20.000Z",
+        source: "user",
+        message: "Find where the session token is checked.",
+      },
+      {
+        step_id: 2,
+        timestamp: "2026-11-01T09:00:24.000Z",
+        source: "agent",
+        message: "The token is checked in src/auth.ts, verifySession().",
+      },
+    ],
+  };
+  const doc = {
+    schema_version: "ATIF-v1.7",
+    session_id: "atif-sess1",
+    agent: {
+      name: "claude-code",
+      version: "2.1.0",
+      model_name: "claude-sonnet-4-5",
+      extra: { decant_tool: "claude" },
+    },
+    steps: [
+      {
+        step_id: 1,
+        timestamp: "2026-11-01T09:00:00.000Z",
+        source: "system",
+        message: "You are a coding agent working in /repo/app.",
+      },
+      {
+        step_id: 2,
+        timestamp: "2026-11-01T09:00:01.000Z",
+        source: "user",
+        message: 'How does auth work? password: "hunter2secretvalue42"',
+      },
+      {
+        step_id: 3,
+        timestamp: "2026-11-01T09:00:05.000Z",
+        source: "agent",
+        model_name: "claude-sonnet-4-5",
+        reasoning_content: "Read the auth module first, then run its tests.",
+        message: "Reading the auth module and running its tests.",
+        tool_calls: [
+          {
+            tool_call_id: "toolu_01AtifReadAuthModule",
+            function_name: "Read",
+            arguments: { file_path: "/repo/app/src/auth.ts" },
+          },
+          {
+            tool_call_id: "toolu_01AtifRunAuthTests",
+            function_name: "Bash",
+            arguments: { command: "bun test src/auth.test.ts" },
+          },
+        ],
+        observation: {
+          results: [
+            {
+              source_call_id: "toolu_01AtifReadAuthModule",
+              content: `export const KEY = "${GITHUB_TOKEN}";`,
+              extra: { is_error: false },
+            },
+            {
+              source_call_id: "toolu_01AtifRunAuthTests",
+              content: "error: Cannot find module './session' from 'src/auth.test.ts'",
+              extra: { is_error: true },
+            },
+          ],
+        },
+        metrics: { prompt_tokens: 1200, completion_tokens: 80 },
+      },
+      {
+        step_id: 4,
+        timestamp: "2026-11-01T09:00:10.000Z",
+        source: "agent",
+        message: "The test import is broken; asking a subagent where the token is checked.",
+        tool_calls: [
+          {
+            tool_call_id: "toolu_01AtifSubagentTask",
+            function_name: "Task",
+            arguments: {
+              description: "Find the token check",
+              prompt: "Find where the session token is checked.",
+            },
+          },
+        ],
+        observation: {
+          results: [
+            {
+              source_call_id: "toolu_01AtifSubagentTask",
+              subagent_trajectory_ref: [{ session_id: "atif-sess1:agent-7f3a" }],
+            },
+          ],
+        },
+      },
+      {
+        step_id: 5,
+        timestamp: "2026-11-01T09:00:30.000Z",
+        source: "agent",
+        message: "Auth reads KEY from src/auth.ts and verifySession() checks the token.",
+      },
+    ],
+    subagent_trajectories: [subagent],
+    extra: { cwd: "/repo/app", git_branch: "main" },
+  };
+  write("atif-claude-session.atif.json", `${JSON.stringify(doc, null, 2)}\n`);
+}

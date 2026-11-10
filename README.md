@@ -87,6 +87,15 @@ as the daemon appends to it, and it is normalized to Letta trajectory-v1 like an
 transcript. Nothing in sessiondb depends on the Trajectory daemon or CLI; it is one more input
 format.
 
+### ATIF documents
+
+[ATIF](https://github.com/harbor-framework/harbor/blob/main/rfcs/0001-trajectory-format.md),
+Harbor's Agent Trajectory Interchange Format, is one JSON document per session from any harness.
+Post it as `agent: "atif"` with `format: "json"`, whole (never in chunks). The trace's `source`
+is the harness the document names in `agent.name`, and each embedded subagent is posted as its
+own session with `parent_session_id`. The rules are in
+[`docs/server.md`](docs/server.md#atif-documents).
+
 ## What the server does with a session
 
 Storage first, then normalize, then the trace. The trace is always made from what is in the
@@ -99,9 +108,10 @@ bucket, so the second step can run again on its own.
 2. **Normalize.** The stored log becomes trajectory-v1 records via
    [`@letta-ai/trajectory`](https://github.com/letta-ai/trajectory), plus the fixups its
    adapters need (Claude Code's queued and background-task input, Codex's inherited history and
-   subagent reports). `agent` is the adapter name, one of `claude-code`, `codex`, `cursor`,
-   `opencode`, `pi`, `gemini-cli`, or `datadog-trajectory`, the server's own adapter that turns
-   a Trajectory session file into the same Letta records as everything else. The records get the
+   subagent reports, an ATIF document's harness name and tool errors). `agent` is the adapter
+   name, one of `claude-code`, `codex`, `cursor`, `opencode`, `pi`, `gemini-cli`, `atif`, or
+   `datadog-trajectory`, the server's own adapter that turns a Trajectory session file into the
+   same Letta records as everything else. The records get the
    redaction pass too, with identifiers that link a tool call to its result left alone so they
    stay coherent.
 3. **Decide what is new.** A conversation under 2000 characters, or with no user turn, or with

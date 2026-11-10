@@ -41,7 +41,7 @@ export class TrajectoryError extends Error {
 // biome-ignore lint/suspicious/noControlCharactersInRegex: the control range is the point
 const SCOPE_COORDINATE = /^[^\x00-\x1f\x7f\u0085\u2028\u2029]*$/;
 
-function isScopeCoordinate(value: unknown): value is string {
+export function isScopeCoordinate(value: unknown): value is string {
   return typeof value === "string" && SCOPE_COORDINATE.test(value);
 }
 

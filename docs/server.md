@@ -122,10 +122,11 @@ Request bodies may be `Content-Encoding: gzip` (any other encoding is a `415`). 
 ```jsonc
 {
   "agent": "claude-code",          // the transcript format: claude-code, codex, cursor, opencode, pi, gemini-cli,
-                                   // or datadog-trajectory (a Trajectory session file, see below)
+                                   // datadog-trajectory (a Trajectory session file, see below),
+                                   // or atif (an ATIF document, see below)
   "session_id": "…",
   "transcript": "…",               // the native log, verbatim
-  "format": "jsonl",               // or "json" (OpenCode exports); how the raw copy is redacted
+  "format": "jsonl",               // or "json" (OpenCode exports, ATIF); how the raw copy is redacted
   "project": "github.com/acme/widget",
   "branch": "main",                // the client's best guess; the transcript's own record wins
   "parent_session_id": "…",        // the session this one was resumed or forked from
@@ -189,7 +190,7 @@ a client need not send the whole of it each time: it sends the bytes past what t
 `metadata.json` holds it as `normalized.bytes`), else `409 offset_mismatch` with `expected` in
 the error and nothing stored: the client resends from `expected`, or from 0 (the whole log)
 when it no longer has that. A chunk is whole lines of a `jsonl` log (it ends with a line
-break; an OpenCode `json` export cannot be chunked): `422 bad_chunk` otherwise. The first upload
+break; an OpenCode `json` export and an ATIF document cannot be chunked): `422 bad_chunk` otherwise. The first upload
 of a session is the whole log (`offset` 0); a chunk for a session the server does not have gets
 `409` with `expected: 0`.
 
@@ -251,3 +252,30 @@ A session the daemon imported from a client's own history (`trajectory session i
 thinner than one it captured live: no prose from the agent, and tool calls present only as
 their results. The adapter reads those too, and most come out `trivial`, which is right: there
 is no conversation in them.
+
+### ATIF documents
+
+[ATIF](https://github.com/harbor-framework/harbor/blob/main/rfcs/0001-trajectory-format.md) is
+Harbor's Agent Trajectory Interchange Format: one JSON document per session, exported from
+whichever harness ran it ([Decant](https://github.com/dosu-ai/decant) writes it). Post one with
+`agent: "atif"` and `format: "json"`. `@letta-ai/trajectory`'s `atif` adapter normalizes it, and
+the server applies these rules:
+
+- **Whole documents only.** An ATIF document is one JSON value, so a chunk (`offset` > 0) gets
+  `422 bad_chunk` whatever `format` says. A session that grew is sent whole again, with `shipped`.
+- **ATIF-v1.0 through ATIF-v1.7.** A later version is stored raw and refused with
+  `422 normalize_invalid_input`; the message names the version.
+- **The harness comes from `agent.name`.** The session is filed under `agent: atif`, and the
+  archive id derives from that. The trace's `source` is the document's `agent.name`
+  (`claude-code`, `codex`, `copilot-cli`), or `atif` when the name is blank or holds control
+  characters. The trace's `agent` field (`atif`) records that the session came in as ATIF.
+- **Tool errors come from `extra.is_error`.** ATIF has no standard success field. A tool result
+  whose `extra.is_error` is a boolean gets `ok` from it; one without gets no `ok`.
+- **Subagents are sent separately.** The adapter does not normalize embedded
+  `subagent_trajectories` into the parent. The parent keeps the subagent's tool result, a
+  `subagent_trajectory_ref`, as JSON text. Post each subagent as its own session, with
+  `parent_session_id` set to the parent's `session_id`.
+
+The adapter also drops system steps (as it does for every source), metrics, costs, token ids,
+logprobs and `extra` fields. The document's `cwd` and `git_branch` do not reach the trace, so
+send `project` and `branch` with the upload.
