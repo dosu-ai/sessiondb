@@ -56,23 +56,58 @@ export function atifSource(document: Json | null): string {
   return typeof name === "string" && name.trim() !== "" && isScopeCoordinate(name) ? name : ATIF;
 }
 
-/** Each tool call id's error flags, in document order, for the results that carry one. A
- * result without a boolean `extra.is_error` holds its place with undefined. */
-function errorFlags(document: Json | null): Map<string, (boolean | undefined)[]> {
-  const flags = new Map<string, (boolean | undefined)[]>();
+/** A non-empty string, else undefined: the adapter's test for an id. */
+const nonEmpty = (value: unknown): string | undefined =>
+  typeof value === "string" && value.length > 0 ? value : undefined;
+
+/** The error flag of each tool record the adapter emits, by the record's `tool_call_id`.
+ *
+ * The adapter renames a call id the document repeats (`c`, `c__2`, …) and links each result to
+ * the first call with its id that no earlier result took, dropping a result with none left. This
+ * follows the same two passes over the same events, so a flag lands on the record of the result
+ * that carried it: every call's final id first, then each result in document order. Only agent
+ * steps' calls count, and only results with a `source_call_id`; a user step's observation is
+ * never read. */
+function errorFlags(document: Json | null): Map<string, boolean> {
+  const flags = new Map<string, boolean>();
   const steps = document?.steps;
   if (!Array.isArray(steps)) return flags;
+
+  const used = new Set<string>();
+  const open = new Map<string, { id: string; taken: boolean }[]>();
+  const results: { callId: string; isError: unknown }[] = [];
+  // The adapter's event index, which names a call that has no id of its own.
+  let event = 0;
   for (const step of steps) {
-    if (!isObject(step) || !isObject(step.observation)) continue;
-    const results = step.observation.results;
-    if (!Array.isArray(results)) continue;
-    for (const result of results) {
-      if (!isObject(result) || typeof result.source_call_id !== "string") continue;
-      const isError = isObject(result.extra) ? result.extra.is_error : undefined;
-      const list = flags.get(result.source_call_id) ?? [];
-      list.push(typeof isError === "boolean" ? isError : undefined);
-      flags.set(result.source_call_id, list);
+    if (!isObject(step)) continue;
+    event += 1; // the step's message
+    if (step.source === "user") continue;
+    if (step.source === "agent") {
+      if (typeof step.reasoning_content === "string") event += 1;
+      for (const call of Array.isArray(step.tool_calls) ? step.tool_calls : []) {
+        event += 1;
+        const sourceId =
+          nonEmpty(isObject(call) ? call.tool_call_id : undefined) ?? `call_${event}`;
+        let id = sourceId;
+        for (let suffix = 2; used.has(id); suffix += 1) id = `${sourceId}__${suffix}`;
+        used.add(id);
+        open.set(sourceId, [...(open.get(sourceId) ?? []), { id, taken: false }]);
+      }
     }
+    const observed = isObject(step.observation) ? step.observation.results : undefined;
+    for (const result of Array.isArray(observed) ? observed : []) {
+      event += 1;
+      const callId = nonEmpty(isObject(result) ? result.source_call_id : undefined);
+      if (callId === undefined) continue;
+      const extra = isObject(result) && isObject(result.extra) ? result.extra : undefined;
+      results.push({ callId, isError: extra?.is_error });
+    }
+  }
+  for (const { callId, isError } of results) {
+    const call = open.get(callId)?.find((entry) => !entry.taken);
+    if (!call) continue;
+    call.taken = true;
+    if (typeof isError === "boolean") flags.set(call.id, isError);
   }
   return flags;
 }
@@ -89,8 +124,7 @@ export function withAtifDetails(
   return records.map((record) => {
     if (record.role === "meta") return { ...record, source };
     if (record.role !== "tool") return record;
-    // Results answer their calls in document order; the nth record for an id is its nth result.
-    const isError = flags.get(record.tool_call_id)?.shift();
+    const isError = flags.get(record.tool_call_id);
     return isError === undefined ? record : { ...record, ok: !isError };
   });
 }

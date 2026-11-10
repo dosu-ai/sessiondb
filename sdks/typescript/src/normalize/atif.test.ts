@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ATIF, atifSource, withAtifDetails } from "./atif";
+import { ATIF, atifSource } from "./atif";
 import { isChunkable, isSource, NormalizeError, normalizeTranscript } from "./index";
 
 const FIXTURE = readFileSync(
@@ -68,26 +68,91 @@ describe("ATIF documents", () => {
     expect(tools[2]).not.toHaveProperty("ok");
   });
 
-  it("match repeated call ids to their results in document order", () => {
-    const transcript = JSON.stringify({
+  /** A session of agent steps, each `[calls, results]`: a call is an id (or null for none), a
+   * result is `[source_call_id, is_error]`. */
+  const session = (...steps: [(string | null)[], [string, boolean | null][]][]) =>
+    JSON.stringify({
+      schema_version: "ATIF-v1.7",
+      session_id: "s",
+      agent: { name: "claude-code", version: "1" },
       steps: [
-        { observation: { results: [{ source_call_id: "c", extra: { is_error: true } }] } },
-        { observation: { results: [{ source_call_id: "c" }] } },
-        { observation: { results: [{ source_call_id: "c", extra: { is_error: false } }] } },
+        { step_id: 1, source: "user", message: "go" },
+        ...steps.map(([calls, results], index) => ({
+          step_id: index + 2,
+          source: "agent",
+          message: "",
+          tool_calls: calls.map((id) => ({
+            ...(id === null ? {} : { tool_call_id: id }),
+            function_name: "Bash",
+            arguments: {},
+          })),
+          observation: {
+            results: results.map(([id, isError]) => ({
+              source_call_id: id,
+              content: `${id} ${isError}`,
+              ...(isError === null ? {} : { extra: { is_error: isError } }),
+            })),
+          },
+        })),
       ],
     });
-    const tool = (n: number) => ({
-      role: "tool" as const,
-      tool_call_id: "c",
-      content: `${n}`,
-      timestamp: "2026-11-01T00:00:00.000Z",
-    });
-    const records = withAtifDetails(transcript, [tool(0), tool(1), tool(2), tool(3)]);
-    expect(records.map((r) => (r.role === "tool" ? r.ok : null))).toEqual([
-      false,
-      undefined,
-      true,
-      undefined,
+  /** What the normalizer made of each result: its record's id, content and ok. */
+  const results = (transcript: string) =>
+    normalize(transcript).records.flatMap((r) =>
+      r.role === "tool" ? [[r.tool_call_id, r.content, r.ok]] : [],
+    );
+
+  it("follow the adapter's renaming of repeated call ids", () => {
+    // The adapter renames the second `c` to `c__2`, so the document's own `c__2` becomes
+    // `c__2__2`; each result answers the first of its id's calls not yet answered.
+    expect(
+      results(
+        session([["c"], [["c", false]]], [["c"], [["c", true]]], [["c__2"], [["c__2", false]]]),
+      ),
+    ).toEqual([
+      ["c", "c false", true],
+      ["c__2", "c true", false],
+      ["c__2__2", "c__2 false", true],
+    ]);
+  });
+
+  it("take no flag from a result the adapter drops, and link a result to a later call", () => {
+    expect(
+      results(
+        session(
+          // A duplicate result for `a`, dropped by the adapter, flagged as failed.
+          [
+            ["a"],
+            [
+              ["a", false],
+              ["a", true],
+            ],
+          ],
+          // `b`'s result arrives a step before its call; the adapter still links it.
+          [[], [["b", true]]],
+          [["b", null], []],
+          // A call without an id, named after its event by the adapter, answered by name.
+          [[null], [["call_10", true]]],
+        ),
+      ),
+    ).toEqual([
+      ["a", "a false", true],
+      ["b", "b true", false],
+      ["call_10", "call_10 true", false],
+    ]);
+  });
+
+  it("leave ok off a result without a boolean is_error", () => {
+    const transcript = session([
+      ["x", "y"],
+      [
+        ["x", null],
+        ["y", false],
+      ],
+    ]).replace('"content":"x null"', '"content":"x null","extra":{"is_error":"yes"}');
+    expect(results(transcript)).toEqual([
+      ["x", "x null", undefined],
+      ["y", "y false", true],
     ]);
   });
 
