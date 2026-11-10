@@ -57,8 +57,8 @@ export interface SessionMetadata {
   archive_id: string;
   session_id: string;
   agent: string;
-  /** What the trace's meta record says it came from (`datadog-trajectory:claude-code`); absent
-   * until a trace is stored. */
+  /** What the trace's meta record says it came from (`datadog-trajectory:claude-code`; an ATIF
+   * document's `agent.name`); absent until a trace is stored. */
   source?: string;
   project?: string;
   branch?: string;

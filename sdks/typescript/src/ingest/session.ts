@@ -23,7 +23,13 @@
  * about HTTP. */
 
 import { gunzipSync, gzipSync } from "node:zlib";
-import { NORMALIZER, NormalizeError, normalizeTranscript, type Source } from "../normalize";
+import {
+  isChunkable,
+  NORMALIZER,
+  NormalizeError,
+  normalizeTranscript,
+  type Source,
+} from "../normalize";
 import { redactRaw } from "../redact/raw";
 import type { NormalizedState, RawFormat, RawPart, SessionMetadata } from "../schemas/store";
 import type { NormalizedRecord } from "../schemas/trajectory";
@@ -336,6 +342,9 @@ export async function storeSession(
   if (offset > 0) {
     if (format !== "jsonl") {
       throw new SessionRejected("bad_chunk", "only a jsonl log can be sent in chunks");
+    }
+    if (!isChunkable(agent)) {
+      throw new SessionRejected("bad_chunk", `a ${agent} document cannot be sent in chunks`);
     }
     if (!transcript.endsWith("\n")) {
       throw new SessionRejected("bad_chunk", "a chunk must end at a line boundary");

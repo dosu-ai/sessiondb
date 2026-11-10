@@ -885,3 +885,88 @@ describe("Datadog Trajectory format", () => {
     ).toMatchObject({ traces: [], raw: [{ part: 0 }] });
   });
 });
+
+describe("ATIF documents", () => {
+  // One JSON document per session, from any harness (Decant exports them). Filed under
+  // `agent: "atif"`; the trace's source is the harness the document names.
+  const ATIF_SMALL = readFileSync(join(TRANSCRIPTS, "atif-claude-session.atif.json"), "utf8");
+  const ATIF_SESSION = "atif-sess1";
+  /** The same document with a final answer long enough to be worth storing. */
+  const atifDocument = (change: (doc: { schema_version: string; steps: unknown[] }) => void) => {
+    const doc = JSON.parse(ATIF_SMALL);
+    doc.steps.push({
+      step_id: doc.steps.length + 1,
+      timestamp: "2026-11-01T09:00:40.000Z",
+      source: "agent",
+      message: `The auth flow: ${"details ".repeat(400)}`,
+    });
+    change(doc);
+    return JSON.stringify(doc);
+  };
+  const ATIF_DOC = atifDocument(() => {});
+  const post = (body: Record<string, unknown>) =>
+    call("POST", "/v1/sessions", {
+      token: TOKEN,
+      body: { agent: "atif", session_id: ATIF_SESSION, format: "json", ...body },
+    });
+
+  it("stores a whole document under atif, its source the harness it names", async () => {
+    const res = await post({ transcript: ATIF_DOC });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { status: string; archive_id: string; content_hash: string };
+    expect(body.status).toBe("stored");
+
+    const archive = archiveId("acme", "atif", ATIF_SESSION);
+    expect(body.archive_id).toBe(archive);
+    expect(await readMetadata(store, "acme", archive)).toMatchObject({
+      agent: "atif",
+      source: "claude-code",
+      head: body.content_hash,
+      raw_format: "json",
+    });
+    const trace = (await getTrace(store, "acme", archive, body.content_hash)) as {
+      source: string;
+      agent: string;
+      events: { role: string; tool_name?: string; ok?: boolean }[];
+    };
+    expect(trace).toMatchObject({ source: "claude-code", agent: "atif" });
+    expect(trace.events.filter((e) => e.role === "tool_result")).toMatchObject([
+      { tool_name: "Read", ok: true },
+      { tool_name: "Bash", ok: false },
+      { tool_name: "Task" },
+    ]);
+    expect(JSON.stringify(trace)).not.toContain("hunter2secretvalue42");
+
+    const again = await post({ transcript: ATIF_DOC });
+    expect(again.status).toBe(200);
+    expect((await again.json()).status).toBe("duplicate");
+  });
+
+  it("refuses a document sent in chunks, whatever the format says", async () => {
+    const first = (await (await post({ transcript: ATIF_DOC })).json()) as { bytes_total: number };
+    for (const format of ["json", "jsonl"]) {
+      const res = await post({ transcript: '{"steps":[]}\n', offset: first.bytes_total, format });
+      expect(res.status).toBe(422);
+      expect((await res.json()).error.code).toBe("bad_chunk");
+    }
+    // Nothing was stored for them.
+    const metadata = await readMetadata(store, "acme", archiveId("acme", "atif", ATIF_SESSION));
+    expect(metadata?.raw).toHaveLength(1);
+  });
+
+  it("refuses ATIF-v1.8 by name, after storing it raw", async () => {
+    const res = await post({
+      transcript: atifDocument((doc) => {
+        doc.schema_version = "ATIF-v1.8";
+      }),
+    });
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toEqual({
+      code: "normalize_invalid_input",
+      message: "ATIF-v1.8 is not supported: this normalizer reads ATIF-v1.0 through ATIF-v1.7",
+    });
+    expect(
+      await readMetadata(store, "acme", archiveId("acme", "atif", ATIF_SESSION)),
+    ).toMatchObject({ traces: [], raw: [{ part: 0, format: "json" }] });
+  });
+});

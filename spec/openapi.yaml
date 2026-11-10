@@ -328,8 +328,10 @@ components:
       description: |
         A transcript format, by its trajectory source name: one spelling, since the archive id
         derives from it. `datadog-trajectory` is a Datadog Trajectory session file, whichever
-        client the daemon captured.
-      enum: [claude-code, codex, cursor, opencode, pi, gemini-cli, datadog-trajectory]
+        client the daemon captured. `atif` is an ATIF-v1.0 through ATIF-v1.7 document (Harbor's
+        Agent Trajectory Interchange Format), whichever harness exported it; it is sent whole,
+        as `json`, and its trace's `source` is the document's `agent.name`.
+      enum: [claude-code, codex, cursor, opencode, pi, gemini-cli, atif, datadog-trajectory]
 
     Owner:
       type: string
@@ -395,7 +397,7 @@ components:
           type: string
           enum: [jsonl, json]
           default: jsonl
-          description: How the raw copy is redacted, line by line or as one document (OpenCode exports). A `json` log cannot be chunked.
+          description: How the raw copy is redacted, line by line or as one document (OpenCode exports, ATIF). A `json` log, and an `atif` document whatever its format, cannot be chunked.
         offset:
           type: integer
           minimum: 0
@@ -554,7 +556,7 @@ components:
         agent: { type: string }
         source:
           type: string
-          description: What normalized the trace (`datadog-trajectory:claude-code`); absent until one is stored.
+          description: What normalized the trace (`datadog-trajectory:claude-code`; for `atif`, the document's `agent.name`); absent until one is stored.
         project: { type: string }
         branch: { type: string }
         parent_session_id: { type: string }

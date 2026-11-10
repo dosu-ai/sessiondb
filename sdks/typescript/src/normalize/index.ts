@@ -1,8 +1,8 @@
 /** Native transcript → redacted trajectory-v1 records. Normalization is `@letta-ai/trajectory`'s
  * job; this module applies the fixups its adapters need (Claude Code's background-task input,
- * Codex's inherited history and subagent reports), runs the adapter, and redacts. The one
- * source it has no adapter for, a Datadog Trajectory session stream, has its own here. String
- * in, records out.
+ * Codex's inherited history and subagent reports, an ATIF document's harness and tool errors),
+ * runs the adapter, and redacts. The one source it has no adapter for, a Datadog Trajectory
+ * session stream, has its own here. String in, records out.
  *
  * A transcript can come in whole or as a chunk: the bytes of a log past a point already
  * normalized. A chunk is normalized on its own and yields the records those lines stand for,
@@ -21,6 +21,7 @@ import {
 import { redactRecords } from "../redact/records";
 import type { NormalizedRecord } from "../schemas/trajectory";
 import { VERSION } from "../version";
+import { ATIF, unsupportedAtifVersion, withAtifDetails } from "./atif";
 import { markClaudeInputs, markedAsObservations } from "./claude-inputs";
 import { subagentReportsAsObservations, withoutInheritedHistory } from "./codex-rollout";
 import { DATADOG_TRAJECTORY, normalizeDatadogTrajectory } from "./datadog-trajectory";
@@ -35,7 +36,8 @@ export const NORMALIZER = {
   version: `${VERSION}+trajectory.${TRAJECTORY_VERSION}`,
 } as const;
 
-/** The native logs `@letta-ai/trajectory` reads, by their trajectory source name. */
+/** The transcripts `@letta-ai/trajectory` reads, by their trajectory source name: the native
+ * logs, and an ATIF document (one JSON document per session, from any harness). */
 const LETTA_SOURCES = [
   "claude-code",
   "cursor",
@@ -43,11 +45,12 @@ const LETTA_SOURCES = [
   "opencode",
   "pi",
   "gemini-cli",
+  ATIF,
 ] as const satisfies readonly TranscriptTrajectorySource[];
 
-/** The transcript formats this server accepts: the native logs, and a Datadog Trajectory
- * session stream. The name is also the `agent` a client sends and what the archive id is
- * derived from. */
+/** The transcript formats this server accepts: the native logs, an ATIF document, and a Datadog
+ * Trajectory session stream. The name is also the `agent` a client sends and what the archive
+ * id is derived from. */
 export const SOURCES = [...LETTA_SOURCES, DATADOG_TRAJECTORY] as const;
 
 export type Source = (typeof SOURCES)[number];
@@ -56,6 +59,12 @@ type LettaSource = (typeof LETTA_SOURCES)[number];
 
 export function isSource(value: string): value is Source {
   return (SOURCES as readonly string[]).includes(value);
+}
+
+/** Whether a source's transcript can arrive in chunks. An ATIF document is one JSON value, so
+ * it is always sent whole, whatever `format` the client says. */
+export function isChunkable(source: Source): boolean {
+  return source !== ATIF;
 }
 
 /** The adapter's refusals that only mean "no conversation here": the session is trivial, not
@@ -129,6 +138,12 @@ function recordsOf(source: Source, transcript: string, chunk?: Chunk): Normalize
   if (source === DATADOG_TRAJECTORY) {
     return normalizeDatadogTrajectory(transcript, { partial: chunk !== undefined });
   }
+  if (source === ATIF) {
+    // The adapter refuses any version past v1.7 with the message it gives every unreadable
+    // document; say which version it was.
+    const unsupported = unsupportedAtifVersion(transcript);
+    if (unsupported) throw new NormalizeError("invalid_input", unsupported);
+  }
   const prepared = prepare(source, transcript);
   const records = chunk
     ? lettaChunk(source, prepared, chunk)
@@ -138,6 +153,8 @@ function recordsOf(source: Source, transcript: string, chunk?: Chunk): Normalize
       return subagentReportsAsObservations(records);
     case "claude-code":
       return markedAsObservations(records);
+    case ATIF:
+      return withAtifDetails(transcript, records);
     default:
       return records;
   }
