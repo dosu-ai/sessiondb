@@ -12,9 +12,13 @@
  *   the result, `ERROR` status when the result says it failed.
  *
  * trajectory-v1 has no token usage, so the spans carry none. Every id is derived from the
- * content hash, so the same trace always converts to the same bytes. The resource carries what
- * the `letta` object keeps outside its records (session, lineage, continuation, normalizer) and
- * the meta record whole, so a writer can continue a session from an OTLP head. */
+ * content hash, so the same trace always converts to the same bytes.
+ *
+ * Nothing is lost: each `chat` span carries the records it was made from verbatim
+ * (`sessiondb.records`, from index `sessiondb.record_start`), the root the records after the
+ * last assistant turn, and the resource the meta record and `metadata` whole, so `fromOtlp`
+ * gives back the `letta` trace, same records and same `content_hash`. That is how a reader
+ * that only knows `letta` (Dosu's backend) reads an `otlp` store. */
 
 import { createHash } from "node:crypto";
 import {
@@ -23,9 +27,10 @@ import {
   type OtlpSpan,
   type OtlpTrace,
 } from "../schemas/otlp";
-import type { Trace } from "../schemas/trace";
-import type { MetaRecord, NormalizedRecord } from "../schemas/trajectory";
+import type { Trace, TraceMetadata } from "../schemas/trace";
+import { type MetaRecord, type NormalizedRecord, TrajectoryError } from "../schemas/trajectory";
 import { VERSION } from "../version";
+import { parseTrajectory } from "./parse";
 
 type Scalar = string | number | boolean | null | undefined;
 
@@ -96,6 +101,8 @@ export function toOtlp(trace: Trace): OtlpTrace {
   const tools = new Map<string, { span: OtlpSpan; startMs: number }>();
   let pending: Message[] = [];
   let reasoning: Part[] = [];
+  // The first record not yet on a span: what the next `chat` span (or the root) carries.
+  let chunkStart = meta ? 1 : 0;
 
   records.forEach((record: NormalizedRecord, index) => {
     if (record.role === "meta") return;
@@ -158,6 +165,8 @@ export function toOtlp(trace: Trace): OtlpTrace {
             ["gen_ai.request.model", model],
             ["gen_ai.input.messages", JSON.stringify(pending)],
             ["gen_ai.output.messages", JSON.stringify([output])],
+            ["sessiondb.record_start", chunkStart],
+            ["sessiondb.records", JSON.stringify(records.slice(chunkStart, index + 1))],
           ]),
           status: { code: 0 },
         });
@@ -185,6 +194,7 @@ export function toOtlp(trace: Trace): OtlpTrace {
         });
         pending = [];
         reasoning = [];
+        chunkStart = index + 1;
         break;
       }
     }
@@ -209,6 +219,11 @@ export function toOtlp(trace: Trace): OtlpTrace {
       ["gen_ai.conversation.id", conversation],
       ["gen_ai.request.model", model],
       ["sessiondb.unanswered_messages", left.length > 0 ? JSON.stringify(left) : undefined],
+      ["sessiondb.record_start", chunkStart < records.length ? chunkStart : undefined],
+      [
+        "sessiondb.records",
+        chunkStart < records.length ? JSON.stringify(records.slice(chunkStart)) : undefined,
+      ],
     ]),
     status: { code: 0 },
   };
@@ -236,6 +251,7 @@ export function toOtlp(trace: Trace): OtlpTrace {
     ["sessiondb.records", records.length],
     ["sessiondb.events", trace.events.length],
     ["sessiondb.meta", meta ? JSON.stringify(meta) : undefined],
+    ["sessiondb.metadata", JSON.stringify(trace.metadata)],
   ]);
 
   return {
@@ -276,4 +292,56 @@ export function otlpMeta(trace: OtlpTrace): MetaRecord | undefined {
   if (typeof raw !== "string") return undefined;
   const meta = JSON.parse(raw) as MetaRecord;
   return meta.role === "meta" ? meta : undefined;
+}
+
+function spanAttribute(span: OtlpSpan, key: string): string | number | undefined {
+  const kv = span.attributes.find((a) => a.key === key);
+  if (!kv) return undefined;
+  if ("stringValue" in kv.value) return kv.value.stringValue;
+  if ("intValue" in kv.value) return Number(kv.value.intValue);
+  return undefined;
+}
+
+/** The `letta` trace an OTLP trace object was made from: the meta record and every span's
+ * `sessiondb.records` in record order, parsed again, its `content_hash` checked against the one
+ * the object names. Throws `TrajectoryError` for an object this SDK did not write (no records
+ * on its spans, a gap between them) or whose records hash to something else. */
+export function fromOtlp(otlp: OtlpTrace): Trace {
+  const hash = otlpResource(otlp, "sessiondb.content_hash");
+  if (typeof hash !== "string") throw new TrajectoryError("not a sessiondb OTLP trace");
+  const chunks: { start: number; records: NormalizedRecord[] }[] = [];
+  for (const span of otlp.resourceSpans.flatMap((r) => r.scopeSpans.flatMap((s) => s.spans))) {
+    const start = spanAttribute(span, "sessiondb.record_start");
+    const raw = spanAttribute(span, "sessiondb.records");
+    if (typeof start === "number" && typeof raw === "string") {
+      chunks.push({ start, records: JSON.parse(raw) as NormalizedRecord[] });
+    }
+  }
+  chunks.sort((a, b) => a.start - b.start);
+  const meta = otlpMeta(otlp);
+  const records: NormalizedRecord[] = meta ? [meta] : [];
+  for (const chunk of chunks) {
+    if (chunk.start !== records.length) {
+      throw new TrajectoryError(`records ${records.length}..${chunk.start} are on no span`);
+    }
+    records.push(...chunk.records);
+  }
+  const str = (key: string) => {
+    const v = otlpResource(otlp, key);
+    return typeof v === "string" ? v : undefined;
+  };
+  const metadataJson = str("sessiondb.metadata");
+  const trace = parseTrajectory(records, {
+    agent: str("sessiondb.agent"),
+    session_id: str("sessiondb.session_id"),
+    project: str("sessiondb.project"),
+    branch: str("sessiondb.branch"),
+    metadata: metadataJson ? (JSON.parse(metadataJson) as TraceMetadata) : undefined,
+  });
+  if (trace.content_hash !== hash) {
+    throw new TrajectoryError(
+      `records hash to ${trace.content_hash.slice(0, 12)}, object ${hash.slice(0, 12)}`,
+    );
+  }
+  return trace;
 }

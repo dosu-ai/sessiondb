@@ -126,8 +126,16 @@ carries what the `letta` object keeps outside its records, as `sessiondb.*` attr
 `schema` (`sessionstorage/trace-otlp/1`), `content_hash`, `agent`, `source`, `session_id`,
 `project`, `branch`, `started_at`, `ended_at`, `cwd`, `git_branch`, `model`,
 `parent_session_id`, `continuation.from_record`, `continuation.prefix_sha256`,
-`normalizer.name`, `normalizer.version`, `records`, `events`, and `meta`, the meta record as
-JSON. `service.name` is `sessiondb`.
+`normalizer.name`, `normalizer.version`, `records`, `events`, `meta` (the meta record as
+JSON) and `metadata` (the `letta` object's `metadata`, as JSON). `service.name` is `sessiondb`.
+
+The object is lossless: every `chat` span carries the records it was made from, verbatim, as
+`sessiondb.records` (a JSON array) starting at record index `sessiondb.record_start`, and the
+root carries the records after the last assistant record the same way. The meta record, then
+those arrays in `record_start` order, are the `letta` object's `records`; parsed with the
+resource's `agent`, `session_id`, `project`, `branch` and `metadata`, they give back its events
+and its `content_hash`, which a reader checks against `sessiondb.content_hash` (`fromOtlp` in
+the SDK). A reader that only knows `letta` reads an `otlp` store this way.
 
 `metadata.normalizer` names what produced `records`: the SDK release and, as
 semver build metadata, the `@letta-ai/trajectory` it ran, so a reader can tell

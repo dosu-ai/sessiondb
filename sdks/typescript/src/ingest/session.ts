@@ -42,7 +42,7 @@ import type { NormalizedRecord } from "../schemas/trajectory";
 import { keys } from "../store/layout";
 import { ensureLayout, markerFormat } from "../store/publish";
 import type { Store } from "../store/store";
-import { otlpMeta } from "../trace/otlp";
+import { fromOtlp, otlpMeta } from "../trace/otlp";
 import { copiedPrefix, planShipment, type ShippedPrefix } from "./continuation";
 import { IngestRejected, OffsetMismatch, SessionRejected } from "./errors";
 import {
@@ -115,8 +115,7 @@ function recordedBranch(value: unknown): string | undefined {
 }
 
 /** What a fork copied from the session it was made from, when that parent is stored here. In
- * an `otlp` store the parent's trace holds spans, not records, so its records are made again
- * from its raw. */
+ * an `otlp` store the parent's records are read back from its spans. */
 async function forkCopy(
   store: Store,
   owner: string,
@@ -128,29 +127,18 @@ async function forkCopy(
   if (!forkOf) return undefined;
   const parent = await getSession(store, owner, agent, forkOf);
   if (!parent?.head) return undefined;
-  if (format === "otlp")
-    return copiedPrefix(records, await rawRecords(store, owner, agent, parent));
+  if (format === "otlp") {
+    const head = await getTrace(store, owner, parent.archive_id, parent.head, "otlp");
+    let parentRecords: NormalizedRecord[] | null = null;
+    try {
+      parentRecords = head ? fromOtlp(head).records : null;
+    } catch {
+      parentRecords = null;
+    }
+    return copiedPrefix(records, parentRecords);
+  }
   const trace = await getTrace(store, owner, parent.archive_id, parent.head);
   return copiedPrefix(records, trace?.records ?? null);
-}
-
-/** A stored session's records, normalized again from its raw parts; null when they cannot be. */
-async function rawRecords(
-  store: Store,
-  owner: string,
-  agent: Source,
-  metadata: SessionMetadata,
-): Promise<NormalizedRecord[] | null> {
-  if (metadata.raw.length === 0) return null;
-  try {
-    const chunks: string[] = [];
-    for (const part of inLogOrder(metadata.raw)) {
-      chunks.push(await readPart(store, owner, metadata.archive_id, part));
-    }
-    return normalize({ source: agent, transcript: chunks.join("") });
-  } catch {
-    return null;
-  }
 }
 
 interface NormalizeStoredInput {

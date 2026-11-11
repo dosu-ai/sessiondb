@@ -12,7 +12,7 @@ import { FsStore } from "../store/fs";
 import { archiveId, keys, LAYOUT_KEY } from "../store/layout";
 import { decodeJson } from "../store/publish";
 import { StoreError } from "../store/store";
-import { isOtlpTrace, otlpMeta, otlpResource, toOtlp } from "./otlp";
+import { fromOtlp, isOtlpTrace, otlpMeta, otlpResource, toOtlp } from "./otlp";
 
 const TRANSCRIPTS = join(
   import.meta.dirname,
@@ -135,6 +135,30 @@ describe("toOtlp", () => {
     expect(isOtlpTrace(trace)).toBe(false);
   });
 
+  it("converts back to the letta trace it was made from", async () => {
+    const trace = await lettaTrace();
+    expect(fromOtlp(toOtlp(trace))).toEqual(trace);
+    // Through JSON too, as a reader gets it from the bucket.
+    expect(fromOtlp(JSON.parse(JSON.stringify(toOtlp(trace))))).toEqual(trace);
+  });
+
+  it("refuses to convert an object whose records are missing or changed", async () => {
+    const otlp = toOtlp(await lettaTrace());
+    const spans = otlp.resourceSpans[0]?.scopeSpans[0]?.spans as OtlpSpan[];
+    const gap = structuredClone(otlp);
+    gap.resourceSpans[0]?.scopeSpans[0]?.spans.splice(1, 1);
+    expect(() => fromOtlp(gap)).toThrow(/on no span/);
+
+    const changed = structuredClone(otlp);
+    const chat = changed.resourceSpans[0]?.scopeSpans[0]?.spans.find(
+      (s) => s.spanId === spans[1]?.spanId,
+    ) as OtlpSpan;
+    const kv = chat.attributes.find((a) => a.key === "sessiondb.records");
+    if (!kv || !("stringValue" in kv.value)) throw new Error("no records");
+    kv.value.stringValue = kv.value.stringValue.replace("auth", "AUTH");
+    expect(() => fromOtlp(changed)).toThrow(/hash to/);
+  });
+
   it("marks a failed tool call as an error and keeps an unanswered question on the root", () => {
     const trace = {
       schema: "sessionstorage/trace/1",
@@ -229,9 +253,13 @@ describe("an otlp store", () => {
     expect(otlpResource(trace, "sessiondb.continuation.from_record")).toBe(first.records_total);
     const head = (await otlp.getTrace("claude-code", "sess1", first.content_hash)) as OtlpTrace;
     expect(otlpMeta(trace)).toEqual(otlpMeta(head));
+    // A continuation converts back too: its tail, with the lineage that places it.
+    const tail = fromOtlp(trace);
+    expect(tail.content_hash).toBe(second.content_hash);
+    expect(tail.metadata.continuation?.from_record).toBe(first.records_total);
   });
 
-  it("writes only what a fork added, reading the parent's records from its raw", async () => {
+  it("writes only what a fork added, reading the parent's records from its spans", async () => {
     const otlp = db();
     const parent = stored(
       await otlp.ingest({ agent: "claude-code", session_id: "parent", transcript: CLAUDE }),

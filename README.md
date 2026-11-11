@@ -159,7 +159,7 @@ const db = connect({ store: "r2://sessions/team", owner: "alice", format: "otlp"
 A bucket holds one format, recorded in its layout marker by its first writer; a writer
 configured for the other refuses it. Writers default to `letta`, so only a writer that opts in
 writes an `otlp` bucket; reads follow whatever the bucket holds. Redaction, dedupe, chunks and forks work the same in both.
-Trajectory-v1 has no token usage, so OTLP spans carry none. See
+An `otlp` object is lossless: its spans carry the records they were made from, so `fromOtlp(trace)` gives back the `letta` trace with the same `content_hash`. Readers that only know `letta` (Dosu's backend) convert this way. Trajectory-v1 has no token usage, so OTLP spans carry none. See
 [`spec/layout.md`](spec/layout.md) for both objects.
 
 ## Access model

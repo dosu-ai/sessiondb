@@ -130,7 +130,7 @@ export {
   type Store,
   StoreError,
 } from "./store/store";
-export { isOtlpTrace, otlpMeta, otlpResource, toOtlp } from "./trace/otlp";
+export { fromOtlp, isOtlpTrace, otlpMeta, otlpResource, toOtlp } from "./trace/otlp";
 export { type ParseOptions, parseTrajectory } from "./trace/parse";
 
 export { VERSION } from "./version";
