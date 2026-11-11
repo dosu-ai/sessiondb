@@ -16,6 +16,7 @@ import {
   StoreError,
   StoreSessionDB,
   type StoreSessionResult,
+  type Trace,
 } from "@dosu/sessiondb";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "./app";
@@ -82,7 +83,11 @@ async function both<T>(call: (db: SessionDB) => Promise<T>): Promise<T> {
 
 describe("the two backends agree", () => {
   it("on identity", async () => {
-    expect(await http.me()).toEqual({ owner: "acme", storage: { url: store.url } });
+    expect(await http.me()).toEqual({
+      owner: "acme",
+      storage: { url: store.url },
+      format: "letta",
+    });
   });
 
   it("on a session's life: store, read, chunk, list, changes, tombstone", async () => {
@@ -118,7 +123,7 @@ describe("the two backends agree", () => {
     expect(metadata?.head).toBe(first.content_hash);
     expect(metadata?.raw).toHaveLength(2);
 
-    const trace = await both((db) => db.getTrace("claude-code", "sess1"));
+    const trace = (await both((db) => db.getTrace("claude-code", "sess1"))) as Trace | null;
     expect(trace?.content_hash).toBe(first.content_hash);
     await both((db) => db.getTrace("claude-code", "sess1", first.content_hash));
 

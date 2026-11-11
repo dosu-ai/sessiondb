@@ -89,9 +89,24 @@ export interface ChangeEntry {
   continuation?: { from_record: number; prefix_sha256: string };
 }
 
+/** What a store's trace objects are: `letta` (`sessionstorage/trace/1`, the Letta
+ * trajectory-v1 records with their events and hash) or `otlp` (an OTLP/HTTP JSON
+ * `ExportTraceServiceRequest` of the same session as GenAI spans). One store holds one format,
+ * recorded in its layout marker; a marker with none is `letta`. */
+export type TraceFormat = "letta" | "otlp";
+
+export const TRACE_FORMATS: readonly TraceFormat[] = ["letta", "otlp"];
+
+export function isTraceFormat(value: unknown): value is TraceFormat {
+  return value === "letta" || value === "otlp";
+}
+
 /** `<prefix>/sessionstorage.json`: written once when a prefix is first used. */
 export interface LayoutMarker {
   schema: typeof LAYOUT_SCHEMA;
   created_at: string;
   created_by: string;
+  /** The format of every trace object under the prefix; absent on markers written before
+   * there was a choice, which are `letta`. */
+  format?: TraceFormat;
 }

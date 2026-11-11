@@ -15,16 +15,22 @@
  * - bucket credentials     `s3://`: `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` (or `S3_*`),
  *                          `AWS_REGION`; `r2://`: `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`,
  *                          `R2_SECRET_ACCESS_KEY`; S3-compatible: `S3_ENDPOINT` with the `AWS_*` keys
+ * - `SESSIONDB_FORMAT`     how traces are written: `letta` (default; trajectory-v1 records) or
+ *                          `otlp` (OTLP/HTTP JSON GenAI spans). A bucket holds one format, set
+ *                          by its first writer; the server refuses to start on the other
  * - `PORT`                 default 7200
  */
 
 import {
   assertOwner,
   ensureLayout,
+  isTraceFormat,
   openStore,
   probe,
   type StorageView,
   type Store,
+  TRACE_FORMATS,
+  type TraceFormat,
 } from "@dosu/sessiondb";
 import { createApp, type TokenGrant } from "./app";
 import { MIN_SECRET_LENGTH } from "./signed-token";
@@ -72,6 +78,12 @@ const url = process.env.SESSIONDB_STORE_URL;
 if (!url)
   fail("SESSIONDB_STORE_URL is required (s3://bucket/prefix, r2://bucket/prefix, file:///path)");
 
+const formatSetting = process.env.SESSIONDB_FORMAT?.trim().toLowerCase() || "letta";
+if (!isTraceFormat(formatSetting)) {
+  fail(`SESSIONDB_FORMAT must be one of ${TRACE_FORMATS.join(", ")}, got '${formatSetting}'`);
+}
+const format: TraceFormat = formatSetting;
+
 const client = `sessiondb-server/${VERSION}`;
 
 let store: Store;
@@ -84,13 +96,13 @@ try {
 
 // Fail at boot, not on the first session, when the bucket or its keys are wrong.
 try {
-  await ensureLayout(store, client);
+  await ensureLayout(store, client, format);
   for (const owner of owners) await probe(store, owner);
 } catch (err) {
   fail(`cannot write to ${url}: ${err instanceof Error ? err.message : String(err)}`);
 }
 
-const app = createApp({ store, storage, tokens, tokenSecret, client });
+const app = createApp({ store, storage, tokens, tokenSecret, client, format });
 const port = Number.parseInt(process.env.PORT ?? "7200", 10);
 
 const server = Bun.serve({
@@ -104,7 +116,7 @@ const server = Bun.serve({
 
 const who = [...owners, ...(tokenSecret ? ["whoever holds a signed token"] : [])].join(", ");
 console.log(
-  `sessiondb-server ${VERSION} listening on http://localhost:${server.port}, writing ${url} for ${who}`,
+  `sessiondb-server ${VERSION} listening on http://localhost:${server.port}, writing ${format} traces to ${url} for ${who}`,
 );
 
 function shutdown(): void {

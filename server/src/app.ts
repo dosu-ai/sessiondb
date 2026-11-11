@@ -25,6 +25,7 @@ import {
   StoreError,
   StoreSessionDB,
   type StoreSessionResult,
+  type TraceFormat,
   type Upload,
 } from "@dosu/sessiondb";
 import { MIN_SECRET_LENGTH, verifyToken } from "./signed-token";
@@ -50,6 +51,9 @@ export interface AppOptions {
   /** Identifies this server in layout markers (`sessiondb-server/0.1.0`). */
   client?: string;
   now?: () => Date;
+  /** How traces are written to the bucket: `letta` (the default) or `otlp`. The bucket's
+   * layout marker must agree. */
+  format?: TraceFormat;
 }
 
 type Handler = (ctx: Context) => Promise<Response> | Response;
@@ -183,7 +187,7 @@ export function createApp(options: AppOptions) {
   function clientFor(owner: string): StoreSessionDB {
     let db = clients.get(owner);
     if (!db) {
-      db = new StoreSessionDB({ store, storage, owner, client, now });
+      db = new StoreSessionDB({ store, storage, owner, client, now, format: options.format });
       clients.set(owner, db);
     }
     return db;
@@ -220,7 +224,10 @@ export function createApp(options: AppOptions) {
 
   // --- identity -----------------------------------------------------------------
 
-  route("GET", "/v1/me", async ({ request }) => json(await authorize(request).me()));
+  route("GET", "/v1/me", async ({ request }) => {
+    const db = authorize(request);
+    return json({ ...(await db.me()), format: await db.traceFormat() });
+  });
 
   // --- sessions ---------------------------------------------------------
 

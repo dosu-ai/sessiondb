@@ -12,6 +12,7 @@ import {
   LAYOUT_SCHEMA,
   type LayoutMarker,
   type SessionMetadata,
+  type TraceFormat,
 } from "../schemas/store";
 import { keys, LAYOUT_KEY } from "./layout";
 import { type Store, StoreError } from "./store";
@@ -127,17 +128,54 @@ export async function appendChange(
   return key;
 }
 
-/** Write the layout marker if the prefix has none. */
-export async function ensureLayout(store: Store, createdBy: string): Promise<LayoutMarker> {
+/** The trace format a marker records: `letta` for one written before there was a choice. */
+export function markerFormat(marker: LayoutMarker): TraceFormat {
+  return marker.format ?? "letta";
+}
+
+/** The store's format, checked against what a writer or reader was configured with: a store
+ * holds one format, so a configuration that names the other is refused rather than mixing
+ * them. */
+function agree(marker: LayoutMarker, requested: TraceFormat | undefined): TraceFormat {
+  const format = markerFormat(marker);
+  if (requested !== undefined && requested !== format) {
+    throw new StoreError(
+      `this store holds ${format} traces (sessionstorage.json); it cannot be used as ${requested}`,
+    );
+  }
+  return format;
+}
+
+/** Write the layout marker if the prefix has none, recording `format` (default `letta`) as the
+ * format of every trace under it. A prefix that already has one keeps it; `format`, when given,
+ * must match it. */
+export async function ensureLayout(
+  store: Store,
+  createdBy: string,
+  format?: TraceFormat,
+): Promise<LayoutMarker> {
   const existing = await store.get(LAYOUT_KEY);
-  if (existing) return decodeJson<LayoutMarker>(existing);
+  if (existing) {
+    const marker = decodeJson<LayoutMarker>(existing);
+    agree(marker, format);
+    return marker;
+  }
   const marker: LayoutMarker = {
     schema: LAYOUT_SCHEMA,
     created_at: new Date().toISOString(),
     created_by: createdBy,
+    format: format ?? "letta",
   };
   await store.put(LAYOUT_KEY, encodeJson(marker), { contentType: "application/json" });
   return marker;
+}
+
+/** The format of a store's traces, for a reader: the marker's, checked against `requested`;
+ * `requested` (else `letta`) for a prefix with no marker yet, which has no traces either. */
+export async function layoutFormat(store: Store, requested?: TraceFormat): Promise<TraceFormat> {
+  const existing = await store.get(LAYOUT_KEY);
+  if (!existing) return requested ?? "letta";
+  return agree(decodeJson<LayoutMarker>(existing), requested);
 }
 
 /** The boot-time write check: PUT then GET a fixed key, so a write-only policy without Delete

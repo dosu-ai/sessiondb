@@ -15,7 +15,8 @@ client writing a bucket directly; any other writer must follow the rules below.
       metadata.json                                   the session's pointer (mutable)
       raw.<n>.<jsonl|json>.gz                         the native transcript, stored first
       trace.<content_hash>.json.gz                    one per distinct content (immutable),
-                                                      made from the raw
+                                                      made from the raw; `letta` stores
+      trace.<content_hash>.otlp.json.gz               the same, in `otlp` stores
     changes/
       <stamp>-<content_hash>.json                     a publish
       <stamp>-tombstone.json                          a tombstone
@@ -46,6 +47,22 @@ anything else under the prefix, and a writer never puts anything under
   file names everywhere.
 
 ## Objects
+
+### `sessionstorage.json` — `sessionstorage/layout/1`
+
+Written once, by the first writer to use the prefix.
+
+```json
+{ "schema": "sessionstorage/layout/1", "created_at": "…", "created_by": "sessiondb-server/0.6.0",
+  "format": "letta" }
+```
+
+`format` is how every trace under the prefix is written, `letta` or `otlp`, chosen by the
+first writer and fixed after: a prefix holds one format, and a writer configured for the other
+refuses to write it. A marker without `format` (written before there was a choice) is `letta`.
+Both formats are made the same way (normalize, redact, derive events, hash) and keyed by the
+same `content_hash`; only the object written differs. `metadata.json`, the raw parts and the
+change feed are the same in both.
 
 ### `trace.<content_hash>.json.gz` — `sessionstorage/trace/1`
 
@@ -84,6 +101,33 @@ later publish does not overwrite it, whatever differs outside the hash.
 
 `events[i].index` is stable for the object's lifetime; anything that addresses
 a span of a session does so by event index range.
+
+### `trace.<content_hash>.otlp.json.gz` — `sessionstorage/trace-otlp/1`
+
+The `otlp` format's trace object: the same trace as OTLP/HTTP JSON, one
+`ExportTraceServiceRequest` (ids as lowercase hex, times as decimal strings of Unix
+nanoseconds), so it can be posted as-is to any OpenTelemetry collector's `/v1/traces`. Immutable
+and content-addressed like the `letta` object. Spans follow OpenTelemetry's GenAI semantic
+conventions:
+
+- one trace per object, `traceId` derived from `content_hash`; a session's objects share
+  `gen_ai.conversation.id` (the session id);
+- an `invoke_agent <source>` root from `started_at` to `ended_at`;
+- a `chat` span per assistant record, from the record before it to the record, with the
+  messages since the last one as `gen_ai.input.messages` and what the assistant said, reasoned
+  and called as `gen_ai.output.messages` (JSON, the conventions' message shape);
+- an `execute_tool <name>` span per tool call, from the call to its result, with
+  `gen_ai.tool.call.arguments` and `gen_ai.tool.call.result`, status `ERROR` when the result
+  says it failed;
+- messages after the last assistant record, on the root as `sessiondb.unanswered_messages`.
+
+trajectory-v1 has no token usage, so no span carries `gen_ai.usage.*`. The resource
+carries what the `letta` object keeps outside its records, as `sessiondb.*` attributes:
+`schema` (`sessionstorage/trace-otlp/1`), `content_hash`, `agent`, `source`, `session_id`,
+`project`, `branch`, `started_at`, `ended_at`, `cwd`, `git_branch`, `model`,
+`parent_session_id`, `continuation.from_record`, `continuation.prefix_sha256`,
+`normalizer.name`, `normalizer.version`, `records`, `events`, and `meta`, the meta record as
+JSON. `service.name` is `sessiondb`.
 
 `metadata.normalizer` names what produced `records`: the SDK release and, as
 semver build metadata, the `@letta-ai/trajectory` it ran, so a reader can tell
@@ -182,8 +226,8 @@ on the pointer and both traces stay listed.
 
 ## Reading
 
-- One session: `metadata.json`, then `trace.<head>.json.gz`; no `head` means
-  raw only, nothing to read yet.
+- One session: `metadata.json`, then `trace.<head>.json.gz` (`trace.<head>.otlp.json.gz` in
+  an `otlp` store; the marker says which); no `head` means raw only, nothing to read yet.
 - Everything new since a cursor: list `changes/` with `StartAfter`, fetch what
   the entries point at.
 - A full scan: list `sessions/`, read each `metadata.json`, skip those with no
