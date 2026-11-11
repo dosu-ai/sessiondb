@@ -17,7 +17,11 @@ the host as locked down as anything else that handles credentials.
 over-redaction and covers the shapes secrets usually take: provider token prefixes, key/value
 credential assignments, bearer headers, JWTs, connection URLs, private-key blocks, and a
 Shannon-entropy pass for anything long and random in a secret-shaped position. A secret in a
-shape none of those recognise reaches the bucket. Treat the bucket as sensitive data with a
+shape none of those recognise reaches the bucket. Before it, a pass withholds what tool calls
+returned when they touched a secrets file or ran a command that prints a secret
+(`sdks/typescript/src/redact/sensitive.ts`), since those are mostly values no pattern
+recognises; an operator can add patterns, files and commands of their own
+(`SESSIONDB_REDACTION_FILE`), never remove a built-in one. Treat the bucket as sensitive data with a
 narrow audience, not as a public artifact. If you find a secret shape the pass misses, report
 it as a vulnerability.
 

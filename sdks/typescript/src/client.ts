@@ -17,6 +17,7 @@ import { gzipSync } from "node:zlib";
 import { OffsetMismatch, SessionRejected } from "./ingest/errors";
 import { getSession, getTrace, listSessions, tombstone } from "./ingest/ingest";
 import { type SessionUpload, type StoreSessionResult, storeSession } from "./ingest/session";
+import type { RedactionRules } from "./redact/rules";
 import type { SessionMetadata } from "./schemas/store";
 import type { Trace } from "./schemas/trace";
 import { type ChangesPage, type ReadChangesOptions, readChanges } from "./store/changes";
@@ -77,6 +78,8 @@ export interface StoreClientOptions {
   /** Identifies this writer in the layout marker (`sessiondb-cli/0.2.0`). */
   client?: string;
   now?: () => Date;
+  /** Redaction added to the built-in rules (`redactionRules`). */
+  redaction?: RedactionRules;
 }
 
 /** The pipeline over a `Store`, scoped to one owner. */
@@ -86,6 +89,7 @@ export class StoreSessionDB implements SessionDB {
   private readonly storage: StorageView;
   private readonly client: string;
   private readonly now: () => Date;
+  private readonly redaction: RedactionRules | undefined;
 
   constructor(options: StoreClientOptions) {
     this.owner = assertOwner(options.owner);
@@ -93,6 +97,7 @@ export class StoreSessionDB implements SessionDB {
     this.storage = options.storage ?? { url: options.store.url };
     this.client = options.client ?? `@dosu/sessiondb/${VERSION}`;
     this.now = options.now ?? (() => new Date());
+    this.redaction = options.redaction;
   }
 
   /** Write the layout marker and this owner's probe, so a wrong bucket or key fails here and
@@ -105,7 +110,7 @@ export class StoreSessionDB implements SessionDB {
   ingest(upload: Upload): Promise<StoreSessionResult> {
     return storeSession(
       { ...upload, format: upload.format ?? "jsonl", owner: this.owner },
-      { store: this.store, client: this.client, now: this.now },
+      { store: this.store, client: this.client, now: this.now, redaction: this.redaction },
     );
   }
 
@@ -336,6 +341,8 @@ export type ConnectOptions =
       store: Store | string;
       owner: string;
       client?: string;
+      /** Redaction added to the built-in rules (`redactionRules`). */
+      redaction?: RedactionRules;
     } & OpenStoreOptions);
 
 /** A client from its configuration: a server and a token, or a store and an owner. */
@@ -343,10 +350,10 @@ export function connect(options: ConnectOptions): SessionDB {
   if ("server" in options) {
     return new HttpSessionDB(options);
   }
-  const { store: target, owner, client, ...open } = options;
+  const { store: target, owner, client, redaction, ...open } = options;
   if (typeof target === "string") {
     const { store, storage } = openStore(target, open);
-    return new StoreSessionDB({ store, storage, owner, client });
+    return new StoreSessionDB({ store, storage, owner, client, redaction });
   }
-  return new StoreSessionDB({ store: target, owner, client });
+  return new StoreSessionDB({ store: target, owner, client, redaction });
 }

@@ -101,9 +101,12 @@ own session with `parent_session_id`. The rules are in
 Storage first, then normalize, then the trace. The trace is always made from what is in the
 bucket, so the second step can run again on its own.
 
-1. **Store.** The native log passes through the redaction pass (provider tokens, key/value
-   credentials in several languages, bearer headers, JWTs, connection URLs, PEM blocks, and a
-   Shannon-entropy pass for what no pattern knows) and is written as the session's raw part.
+1. **Store.** The native log passes through redaction and is written as the session's raw
+   part. What a tool call returned is withheld when the call read a secrets file (`.env`, keys,
+   cloud credentials) or ran a command that prints one (`printenv`, `gh auth token`); then your
+   own patterns, if you set any; then the built-in ones (provider tokens, key/value credentials
+   in several languages, bearer headers, JWTs, connection URLs, PEM blocks, and a
+   Shannon-entropy pass for what no pattern knows).
    That creates the session; nothing else has happened yet.
 2. **Normalize.** The stored log becomes trajectory-v1 records via
    [`@letta-ai/trajectory`](https://github.com/letta-ai/trajectory), plus the fixups its

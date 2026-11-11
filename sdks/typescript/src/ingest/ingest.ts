@@ -148,6 +148,7 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
   if (existing?.raw_format) next.raw_format = existing.raw_format;
   const normalized = input.normalized ?? existing?.normalized;
   if (normalized) next.normalized = normalized;
+  if (existing?.withheld_calls) next.withheld_calls = existing.withheld_calls;
 
   // A duplicate is one the pointer already lists and whose object was there: nothing new to say.
   // An object that exists without a pointer entry (an interrupted earlier publish) is completed
@@ -195,6 +196,8 @@ export interface PutRawInput {
   /** The part is the whole log: every other part stored is of an earlier version of it and is
    * removed. */
   whole?: boolean;
+  /** The calls withheld in the log so far, this part included (`SessionMetadata.withheld_calls`). */
+  withheld_calls?: SessionMetadata["withheld_calls"];
   /** Identifies the writer in the layout marker. */
   client?: string;
   now?: () => Date;
@@ -228,9 +231,16 @@ export async function putRaw(input: PutRawInput): Promise<PutRawResult> {
   );
   const others = (existing?.raw ?? []).filter((r) => r.part !== part);
   const stale = input.whole ? others : [];
+  const withheld =
+    input.withheld_calls && Object.keys(input.withheld_calls).length > 0
+      ? input.withheld_calls
+      : undefined;
   const same = existing?.raw.find((r) => r.part === part);
   if (same && outcome === "exists" && same.offset === offset && same.length === length) {
-    if (stale.length === 0) return { status: "exists", part };
+    const kept = JSON.stringify(existing?.withheld_calls ?? null);
+    if (stale.length === 0 && kept === JSON.stringify(withheld ?? null)) {
+      return { status: "exists", part };
+    }
   }
   for (const r of stale) await store.delete(keys.raw(owner, archive, r.part, r.format));
   const raw = [
@@ -262,6 +272,8 @@ export async function putRaw(input: PutRawInput): Promise<PutRawResult> {
       };
   // A whole log starts the chunk state over: what was normalized was of the parts just removed.
   if (input.whole) delete next.normalized;
+  if (withheld) next.withheld_calls = withheld;
+  else delete next.withheld_calls;
   await swapMetadata(store, next);
   return { status: "stored", part };
 }

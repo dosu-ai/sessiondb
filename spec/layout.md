@@ -123,6 +123,9 @@ empty `traces`, and no `head` or `source`, and never appears in `changes/`.
     "records": 15, "prefix_sha256": "…",   // the whole session's, so far
     "hash_state": "…"                // the prefix hash mid-stream, for the next chunk to extend
   },
+  "withheld_calls": {                // tool calls whose results are redacted whole, by id, so a
+    "toolu_01…": "sensitive-file"    // result in a later chunk is too; absent when there are none
+  },                                 // ("sensitive-file" or "secret-output")
   "created_at": "…", "updated_at": "…"
 }
 ```

@@ -31,6 +31,7 @@ import {
   type Source,
 } from "../normalize";
 import { redactRaw } from "../redact/raw";
+import { applyRules, type RedactionRules, redactionRules } from "../redact/rules";
 import type { NormalizedState, RawFormat, RawPart, SessionMetadata } from "../schemas/store";
 import type { NormalizedRecord } from "../schemas/trajectory";
 import { keys } from "../store/layout";
@@ -74,7 +75,12 @@ export interface SessionOptions {
   /** Identifies the writer in the layout marker. */
   client?: string;
   now?: () => Date;
+  /** The operator's own redaction (`redactionRules`); the built-in rules when omitted. Either
+   * way the built-ins apply. */
+  redaction?: RedactionRules;
 }
+
+const BUILTIN_RULES = redactionRules();
 
 /** What the client keeps after the call, whatever was written: its shipped prefix, and where
  * the next chunk starts. */
@@ -339,6 +345,7 @@ export async function storeSession(
   const length = new TextEncoder().encode(transcript).length;
 
   let part = 0;
+  let carried: SessionMetadata["withheld_calls"] = {};
   if (offset > 0) {
     if (format !== "jsonl") {
       throw new SessionRejected("bad_chunk", "only a jsonl log can be sent in chunks");
@@ -356,8 +363,11 @@ export async function storeSession(
     const parts = existing?.raw ?? [];
     part =
       parts.find((r) => r.offset === offset)?.part ?? Math.max(-1, ...parts.map((r) => r.part)) + 1;
+    carried = existing?.withheld_calls ?? {};
   }
 
+  // Sensitive calls and the operator's patterns first, then the built-in secret patterns.
+  const ruled = applyRules(transcript, format, options.redaction ?? BUILTIN_RULES, carried);
   const raw = await putRaw({
     store,
     owner,
@@ -365,10 +375,11 @@ export async function storeSession(
     session_id: sessionId,
     part,
     format,
-    bytes: new Uint8Array(gzipSync(redactRaw(transcript, format))),
+    bytes: new Uint8Array(gzipSync(redactRaw(ruled.text, format))),
     offset,
     length,
     whole: offset === 0,
+    withheld_calls: ruled.withheld,
     client,
     now,
   });
