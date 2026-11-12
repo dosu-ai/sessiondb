@@ -112,9 +112,11 @@ bucket, so the second step can run again on its own.
    [`@letta-ai/trajectory`](https://github.com/letta-ai/trajectory), plus the fixups its
    adapters need (Claude Code's queued and background-task input, Codex's inherited history and
    subagent reports, an ATIF document's harness name and tool errors). `agent` is the adapter
-   name, one of `claude-code`, `codex`, `cursor`, `opencode`, `pi`, `gemini-cli`, `atif`, or
+   name, one of `claude-code`, `codex`, `cursor`, `opencode`, `pi`, `gemini-cli`, `atif`,
    `datadog-trajectory`, the server's own adapter that turns a Trajectory session file into the
-   same Letta records as everything else. The records get the
+   same Letta records as everything else, or `trajectory`, records already in trajectory-v1
+   that pass through checked. The SDK's `detectSource` names the format from a file's first
+   bytes. The records get the
    redaction pass too, with identifiers that link a tool call to its result left alone so they
    stay coherent.
 3. **Decide what is new.** A conversation under 2000 characters, or with no user turn, or with
