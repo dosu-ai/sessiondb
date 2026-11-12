@@ -123,7 +123,7 @@ describe("auth", () => {
     ]) {
       const res = await call("GET", "/v1/me", { token });
       expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ owner, storage: { url: store.url } });
+      expect(await res.json()).toEqual({ owner, storage: { url: store.url }, format: "letta" });
     }
   });
 
@@ -172,7 +172,11 @@ describe("auth", () => {
     it("accepts a token the secret signed, as the owner it names", async () => {
       const res = await call("GET", "/v1/me", { token: mint("u-42") });
       expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ owner: "u-42", storage: { url: store.url } });
+      expect(await res.json()).toEqual({
+        owner: "u-42",
+        storage: { url: store.url },
+        format: "letta",
+      });
     });
 
     it("scopes it to that owner's folder, like a listed token", async () => {
@@ -975,16 +979,16 @@ describe("ATIF documents", () => {
     expect(metadata?.raw).toHaveLength(1);
   });
 
-  it("refuses ATIF-v1.8 by name, after storing it raw", async () => {
+  it("refuses ATIF-v1.9 by name, after storing it raw", async () => {
     const res = await post({
       transcript: atifDocument((doc) => {
-        doc.schema_version = "ATIF-v1.8";
+        doc.schema_version = "ATIF-v1.9";
       }),
     });
     expect(res.status).toBe(422);
     expect((await res.json()).error).toEqual({
       code: "normalize_invalid_input",
-      message: "ATIF-v1.8 is not supported: this normalizer reads ATIF-v1.0 through ATIF-v1.7",
+      message: "ATIF-v1.9 is not supported: this normalizer reads ATIF-v1.0 through ATIF-v1.8",
     });
     expect(
       await readMetadata(store, "acme", archiveId("acme", "atif", ATIF_SESSION)),

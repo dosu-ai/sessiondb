@@ -1,7 +1,8 @@
 /** `@dosu/sessiondb`: coding-agent sessions as a durable, redacted, content-addressed store.
  *
  * `connect()` gives a `SessionDB`: `ingest` a native transcript (redacted, normalized to
- * trajectory-v1, published into the `sessionstorage` layout, `spec/layout.md`), and
+ * trajectory-v1, published into the `sessionstorage` layout, `spec/layout.md`, as Letta records
+ * or, with `format: "otlp"`, as OTLP GenAI spans), and
  * `getSession`, `getTrace`, `listSessions`, `changes` to read the layout back. Two backends
  * behind the one interface: a `Store` written directly (a folder, or a bucket on S3, R2 or
  * anything S3-compatible: serverless), or a sessiondb server that runs this same package
@@ -35,6 +36,7 @@ export {
   type IngestResult,
   listSessions,
   type PutRawResult,
+  type StoredTrace,
   type TombstoneInput,
   tombstone,
 } from "./ingest/ingest";
@@ -92,6 +94,15 @@ export {
   type WithheldCalls,
   type WithheldKind,
 } from "./redact/sensitive";
+export type {
+  OtlpAnyValue,
+  OtlpKeyValue,
+  OtlpSpan,
+  OtlpSpanKind,
+  OtlpStatus,
+  OtlpTrace,
+} from "./schemas/otlp";
+export { OTLP_TRACE_SCHEMA } from "./schemas/otlp";
 // The layout's objects.
 export type {
   ChangeEntry,
@@ -103,8 +114,15 @@ export type {
   SessionMetadata,
   SessionStatus,
   SessionTraceRef,
+  TraceFormat,
 } from "./schemas/store";
-export { CHANGE_SCHEMA, LAYOUT_SCHEMA, METADATA_SCHEMA } from "./schemas/store";
+export {
+  CHANGE_SCHEMA,
+  isTraceFormat,
+  LAYOUT_SCHEMA,
+  METADATA_SCHEMA,
+  TRACE_FORMATS,
+} from "./schemas/store";
 export type {
   Continuation,
   EventRole,
@@ -125,6 +143,8 @@ export {
   ensureLayout,
   gunzipJson,
   gzipJson,
+  layoutFormat,
+  markerFormat,
   probe,
   readMetadata,
   sha256,
@@ -143,6 +163,7 @@ export {
   type Store,
   StoreError,
 } from "./store/store";
+export { fromOtlp, isOtlpTrace, otlpMeta, otlpResource, toOtlp } from "./trace/otlp";
 export { type ParseOptions, parseTrajectory } from "./trace/parse";
 
 export { VERSION } from "./version";

@@ -341,6 +341,32 @@ describe("the server honours it", () => {
     expect((await call("DELETE", "/v1/sessions/claude-code/x", { token: null })).status).toBe(401);
   });
 
+  it("an otlp bucket", async () => {
+    const otlp = createApp({
+      store,
+      storage: { url: store.url },
+      tokens: [{ token: TOKEN, owner: "acme" }],
+      format: "otlp",
+    });
+    const me = await call("GET", "/v1/me", { app: otlp });
+    expect(me.body).toMatchObject({ format: "otlp" });
+    const body = { agent: "claude-code", session_id: "sess1", transcript: CLAUDE };
+    expect((await call("POST", "/v1/sessions", { body, app: otlp })).status).toBe(201);
+    const trace = await call("GET", "/v1/sessions/claude-code/sess1/trace", { app: otlp });
+    expect(trace.status).toBe(200);
+    expect(trace.body).toHaveProperty("resourceSpans");
+    // The bucket is otlp now; a server configured for letta is refused it.
+    const letta = createApp({
+      store,
+      storage: { url: store.url },
+      tokens: [{ token: TOKEN, owner: "acme" }],
+      format: "letta",
+    });
+    const refused = await call("POST", "/v1/sessions", { body, app: letta });
+    expect(refused.status).toBe(502);
+    expect(JSON.stringify(refused.body)).toContain("holds otlp traces");
+  });
+
   it("a failing bucket", async () => {
     const broken: Store = {
       url: store.url,
@@ -356,6 +382,7 @@ describe("the server honours it", () => {
       tokens: [{ token: TOKEN, owner: "acme" }],
     });
     const body = { agent: "claude-code", session_id: "x", transcript: CLAUDE };
+    expect((await call("GET", "/v1/me", { app: down })).status).toBe(502);
     expect((await call("POST", "/v1/sessions", { body, app: down })).status).toBe(502);
     expect((await call("GET", "/v1/sessions", { app: down })).status).toBe(502);
     expect((await call("GET", "/v1/sessions/claude-code/x", { app: down })).status).toBe(502);

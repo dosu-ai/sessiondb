@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { connect, type SessionDB, StoreSessionDB } from "./client";
 import { IngestRejected, OffsetMismatch, SessionRejected } from "./ingest/errors";
 import type { StoreSessionResult } from "./ingest/session";
+import type { Trace } from "./schemas/trace";
 import { FsStore } from "./store/fs";
 import { StoreError } from "./store/store";
 
@@ -86,7 +87,7 @@ describe("over a store", () => {
       project: "github.com/acme/widget",
     });
 
-    const trace = await db.getTrace("claude-code", "sess1");
+    const trace = (await db.getTrace("claude-code", "sess1")) as Trace | null;
     expect(trace?.content_hash).toBe(result.content_hash);
     expect(trace?.metadata.normalizer?.name).toBe("@dosu/sessiondb");
     expect(await db.getTrace("claude-code", "sess1", result.content_hash)).toEqual(trace);

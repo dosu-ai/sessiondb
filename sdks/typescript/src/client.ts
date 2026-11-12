@@ -15,15 +15,15 @@
 
 import { gzipSync } from "node:zlib";
 import { OffsetMismatch, SessionRejected } from "./ingest/errors";
-import { getSession, getTrace, listSessions, tombstone } from "./ingest/ingest";
+import { getSession, getTrace, listSessions, type StoredTrace, tombstone } from "./ingest/ingest";
 import { type SessionUpload, type StoreSessionResult, storeSession } from "./ingest/session";
 import type { RedactionRules } from "./redact/rules";
-import type { SessionMetadata } from "./schemas/store";
+import type { SessionMetadata, TraceFormat } from "./schemas/store";
 import type { Trace } from "./schemas/trace";
 import { type ChangesPage, type ReadChangesOptions, readChanges } from "./store/changes";
-import { archiveId, assertOwner } from "./store/layout";
+import { archiveId, assertOwner, LAYOUT_KEY } from "./store/layout";
 import { type OpenStoreOptions, openStore, type StorageView } from "./store/open";
-import { ensureLayout, probe } from "./store/publish";
+import { ensureLayout, layoutFormat, probe } from "./store/publish";
 import { type Store, StoreError } from "./store/store";
 import { VERSION } from "./version";
 
@@ -47,6 +47,10 @@ export interface Identity {
   owner: string;
   /** Where the sessions go, as a reader would need to know it. */
   storage: StorageView;
+  /** The format of the store's traces, as a server reports it; absent from a server older than
+   * the choice (which is `letta`) and from a client over a store, which says it from
+   * `traceFormat()`. */
+  format?: TraceFormat;
 }
 
 export interface SessionDB {
@@ -56,9 +60,9 @@ export interface SessionDB {
   ingest(upload: Upload): Promise<StoreSessionResult>;
   /** The session's pointer, or null for one not stored. */
   getSession(agent: string, sessionId: string): Promise<SessionMetadata | null>;
-  /** The head trace, or the one named by `hash`; null for a session not stored, stored raw
-   * only, or redacted. */
-  getTrace(agent: string, sessionId: string, hash?: string): Promise<Trace | null>;
+  /** The head trace, or the one named by `hash`, in the store's format (`isOtlpTrace` tells
+   * which); null for a session not stored, stored raw only, or redacted. */
+  getTrace(agent: string, sessionId: string, hash?: string): Promise<StoredTrace | null>;
   listSessions(options?: ListSessionsOptions): Promise<SessionsPage>;
   /** Drop the session's objects and append a tombstone; null for one not stored. */
   tombstone(agent: string, sessionId: string): Promise<{ removed: number } | null>;
@@ -80,6 +84,10 @@ export interface StoreClientOptions {
   now?: () => Date;
   /** Redaction added to the built-in rules (`redactionRules`). */
   redaction?: RedactionRules;
+  /** How traces are written: `letta` (trajectory-v1 records, the default) or `otlp` (GenAI
+   * spans). A new store takes it; an existing one must hold it, so writing an `otlp` store
+   * takes opting in. Reads (`getTrace`, `me`) follow whatever the store holds either way. */
+  format?: TraceFormat;
 }
 
 /** The pipeline over a `Store`, scoped to one owner. */
@@ -90,6 +98,8 @@ export class StoreSessionDB implements SessionDB {
   private readonly client: string;
   private readonly now: () => Date;
   private readonly redaction: RedactionRules | undefined;
+  private readonly format: TraceFormat | undefined;
+  private resolved: TraceFormat | undefined;
 
   constructor(options: StoreClientOptions) {
     this.owner = assertOwner(options.owner);
@@ -98,19 +108,35 @@ export class StoreSessionDB implements SessionDB {
     this.client = options.client ?? `@dosu/sessiondb/${VERSION}`;
     this.now = options.now ?? (() => new Date());
     this.redaction = options.redaction;
+    this.format = options.format;
+  }
+
+  /** The store's trace format: its marker's, checked against the one configured. Remembered
+   * once the store has a marker, since a store never changes format. */
+  async traceFormat(): Promise<TraceFormat> {
+    if (this.resolved) return this.resolved;
+    const format = await layoutFormat(this.store, this.format);
+    if (await this.store.stat(LAYOUT_KEY)) this.resolved = format;
+    return format;
   }
 
   /** Write the layout marker and this owner's probe, so a wrong bucket or key fails here and
    * not on the first session. */
   async check(): Promise<void> {
-    await ensureLayout(this.store, this.client);
+    await ensureLayout(this.store, this.client, this.format ?? "letta");
     await probe(this.store, this.owner);
   }
 
   ingest(upload: Upload): Promise<StoreSessionResult> {
     return storeSession(
       { ...upload, format: upload.format ?? "jsonl", owner: this.owner },
-      { store: this.store, client: this.client, now: this.now, redaction: this.redaction },
+      {
+        store: this.store,
+        client: this.client,
+        now: this.now,
+        redaction: this.redaction,
+        format: this.format,
+      },
     );
   }
 
@@ -118,12 +144,13 @@ export class StoreSessionDB implements SessionDB {
     return getSession(this.store, this.owner, agent, sessionId);
   }
 
-  async getTrace(agent: string, sessionId: string, hash?: string): Promise<Trace | null> {
+  async getTrace(agent: string, sessionId: string, hash?: string): Promise<StoredTrace | null> {
     const metadata = await this.getSession(agent, sessionId);
     if (!metadata || metadata.status === "redacted") return null;
     const wanted = hash ?? metadata.head;
     if (!wanted) return null;
-    return getTrace(this.store, this.owner, archiveId(this.owner, agent, sessionId), wanted);
+    const archive = archiveId(this.owner, agent, sessionId);
+    return getTrace(this.store, this.owner, archive, wanted, await this.traceFormat());
   }
 
   listSessions(options: ListSessionsOptions = {}): Promise<SessionsPage> {
@@ -133,13 +160,14 @@ export class StoreSessionDB implements SessionDB {
     });
   }
 
-  tombstone(agent: string, sessionId: string): Promise<{ removed: number } | null> {
+  async tombstone(agent: string, sessionId: string): Promise<{ removed: number } | null> {
     return tombstone({
       store: this.store,
       owner: this.owner,
       agent,
       session_id: sessionId,
       now: this.now,
+      format: await this.traceFormat(),
     });
   }
 
@@ -147,6 +175,7 @@ export class StoreSessionDB implements SessionDB {
     return readChanges(this.store, this.owner, options);
   }
 
+  /** Who this client is, without touching the store; `traceFormat()` reads the store's format. */
   async me(): Promise<Identity> {
     return { owner: this.owner, storage: this.storage };
   }
@@ -291,7 +320,7 @@ export class HttpSessionDB implements SessionDB {
     return body as SessionMetadata;
   }
 
-  async getTrace(agent: string, sessionId: string, hash?: string): Promise<Trace | null> {
+  async getTrace(agent: string, sessionId: string, hash?: string): Promise<StoredTrace | null> {
     const { status, body } = await this.request(
       "GET",
       `${this.sessionPath(agent, sessionId)}/trace`,
@@ -299,7 +328,7 @@ export class HttpSessionDB implements SessionDB {
     );
     if (status === 404 || status === 410) return null;
     if (status !== 200) HttpSessionDB.refuse(status, body);
-    return body as Trace;
+    return body as StoredTrace;
   }
 
   async listSessions(options: ListSessionsOptions = {}): Promise<SessionsPage> {
@@ -343,6 +372,8 @@ export type ConnectOptions =
       client?: string;
       /** Redaction added to the built-in rules (`redactionRules`). */
       redaction?: RedactionRules;
+      /** The trace format; see `StoreClientOptions.format`. */
+      format?: TraceFormat;
     } & OpenStoreOptions);
 
 /** A client from its configuration: a server and a token, or a store and an owner. */
@@ -350,10 +381,10 @@ export function connect(options: ConnectOptions): SessionDB {
   if ("server" in options) {
     return new HttpSessionDB(options);
   }
-  const { store: target, owner, client, redaction, ...open } = options;
+  const { store: target, owner, client, redaction, format, ...open } = options;
   if (typeof target === "string") {
     const { store, storage } = openStore(target, open);
-    return new StoreSessionDB({ store, storage, owner, client, redaction });
+    return new StoreSessionDB({ store, storage, owner, client, redaction, format });
   }
-  return new StoreSessionDB({ store: target, owner, client, redaction });
+  return new StoreSessionDB({ store: target, owner, client, redaction, format });
 }
