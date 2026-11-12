@@ -4,6 +4,11 @@
  * JSON document per session, exported by a tool such as Decant from whichever harness ran it.
  * The adapter reads ATIF-v1.0 through ATIF-v1.7 and loses two things a reader wants.
  *
+ * ATIF-v1.8, the current version, differs from v1.7 only by the `audio` content part. The
+ * adapter is handed a v1.8 document as v1.7 with each audio part turned into the text
+ * `[audio]`, the placeholder it already writes for an image; one it was given as is would be
+ * dropped from the text without a trace.
+ *
  * The harness: the adapter stamps every meta record `source: "atif"`, so a Claude Code session
  * and a Codex session look the same in a trace. The document names the harness in `agent.name`
  * (Harbor's names: `claude-code`, `codex`, `copilot-cli`), and that becomes the meta record's
@@ -23,8 +28,12 @@ import { isScopeCoordinate } from "../schemas/trajectory";
  * not name a usable harness. */
 export const ATIF = "atif" as const;
 
-/** The schema versions the pinned adapter reads. */
-const SUPPORTED_VERSION = /^ATIF-v1\.[0-7]$/;
+/** The schema versions this normalizer reads: the adapter's v1.0 through v1.7, and v1.8 through
+ * `asAdapterVersion`. */
+const SUPPORTED_VERSION = /^ATIF-v1\.[0-8]$/;
+
+/** The one version the adapter does not read itself. */
+const AUDIO_VERSION = "ATIF-v1.8";
 
 type Json = Record<string, unknown>;
 
@@ -45,7 +54,45 @@ function parseDocument(transcript: string): Json | null {
 export function unsupportedAtifVersion(transcript: string): string | null {
   const version = parseDocument(transcript)?.schema_version;
   if (typeof version !== "string" || SUPPORTED_VERSION.test(version)) return null;
-  return `${version} is not supported: this normalizer reads ATIF-v1.0 through ATIF-v1.7`;
+  return `${version} is not supported: this normalizer reads ATIF-v1.0 through ATIF-v1.8`;
+}
+
+/** A content value (a `message` or a result's `content`) with each audio part as the text
+ * `[audio]`. */
+function withoutAudio(content: unknown): unknown {
+  if (!Array.isArray(content)) return content;
+  return content.map((part) =>
+    isObject(part) && part.type === "audio" ? { type: "text", text: "[audio]" } : part,
+  );
+}
+
+/** The transcript the adapter is given: an ATIF-v1.8 document as v1.7, its audio parts as text;
+ * any other transcript as it is. */
+export function asAdapterVersion(transcript: string): string {
+  const document = parseDocument(transcript);
+  if (document?.schema_version !== AUDIO_VERSION || !Array.isArray(document.steps)) {
+    return transcript;
+  }
+  const steps = document.steps.map((step) => {
+    if (!isObject(step)) return step;
+    const observation = step.observation;
+    const results = isObject(observation) ? observation.results : undefined;
+    return {
+      ...step,
+      message: withoutAudio(step.message),
+      ...(Array.isArray(results)
+        ? {
+            observation: {
+              ...(observation as Json),
+              results: results.map((result) =>
+                isObject(result) ? { ...result, content: withoutAudio(result.content) } : result,
+              ),
+            },
+          }
+        : {}),
+    };
+  });
+  return JSON.stringify({ ...document, schema_version: "ATIF-v1.7", steps });
 }
 
 /** The trace source for a document: its `agent.name` when that is a non-blank scope

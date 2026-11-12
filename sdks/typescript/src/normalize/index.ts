@@ -22,7 +22,7 @@ import {
 import { redactRecords } from "../redact/records";
 import type { NormalizedRecord } from "../schemas/trajectory";
 import { VERSION } from "../version";
-import { ATIF, unsupportedAtifVersion, withAtifDetails } from "./atif";
+import { ATIF, asAdapterVersion, unsupportedAtifVersion, withAtifDetails } from "./atif";
 import { markClaudeInputs, markedAsObservations } from "./claude-inputs";
 import { subagentReportsAsObservations, withoutInheritedHistory } from "./codex-rollout";
 import { DATADOG_TRAJECTORY, normalizeDatadogTrajectory } from "./datadog-trajectory";
@@ -109,6 +109,8 @@ function prepare(source: LettaSource, transcript: string): string {
       return withoutInheritedHistory(transcript);
     case "claude-code":
       return markClaudeInputs(transcript);
+    case ATIF:
+      return asAdapterVersion(transcript);
     default:
       return transcript;
   }
@@ -147,8 +149,8 @@ function recordsOf(source: Source, transcript: string, chunk?: Chunk): Normalize
     return trajectoryRecords(transcript, { partial: chunk !== undefined });
   }
   if (source === ATIF) {
-    // The adapter refuses any version past v1.7 with the message it gives every unreadable
-    // document; say which version it was.
+    // The adapter refuses any version it does not read with the message it gives every
+    // unreadable document; say which version it was.
     const unsupported = unsupportedAtifVersion(transcript);
     if (unsupported) throw new NormalizeError("invalid_input", unsupported);
   }
