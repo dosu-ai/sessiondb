@@ -1,3 +1,10 @@
+# [0.8.0](https://github.com/dosu-ai/sessiondb/compare/v0.7.0...v0.8.0) (2026-11-12)
+
+
+### Features
+
+* **sdk:** choose the trace format, letta or otlp ([0e55071](https://github.com/dosu-ai/sessiondb/commit/0e55071898af93da1268f871689d56a240db1f24))
+
 # [0.7.0](https://github.com/dosu-ai/sessiondb/compare/v0.6.0...v0.7.0) (2026-11-12)
 
 
