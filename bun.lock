@@ -19,14 +19,14 @@
     },
     "sdks/typescript": {
       "name": "@dosu/sessiondb",
-      "version": "0.6.0",
+      "version": "0.7.0",
       "dependencies": {
         "@letta-ai/trajectory": "^0.3.0",
       },
     },
     "server": {
       "name": "sessiondb-server",
-      "version": "0.6.0",
+      "version": "0.7.0",
       "dependencies": {
         "@dosu/sessiondb": "workspace:*",
       },

@@ -1,3 +1,10 @@
+# [0.7.0](https://github.com/dosu-ai/sessiondb/compare/v0.6.0...v0.7.0) (2026-11-12)
+
+
+### Features
+
+* **sdk:** read ATIF-v1.8 documents ([b24c5e0](https://github.com/dosu-ai/sessiondb/commit/b24c5e0b19ddbe2c88755b03f82df7734ae49397))
+
 # [0.6.0](https://github.com/dosu-ai/sessiondb/compare/v0.5.0...v0.6.0) (2026-11-12)
 
 
