@@ -75,7 +75,8 @@ later publish does not overwrite it, whatever differs outside the hash.
   "content_hash": "…",
   "source": "claude-code",          // what normalized it (trajectory-v1 meta.source); a session
                                     // in Datadog Trajectory's format is "datadog-trajectory:claude-code";
-                                    // an ATIF document's is its agent.name, else "atif"
+                                    // an ATIF document's is its agent.name, else "atif";
+                                    // trajectory-v1 records' is their own meta.source
   "agent": "claude-code",           // what the client posted it as; the archive id derives from it
   "project": "github.com/acme/widget",
   "branch": "main",

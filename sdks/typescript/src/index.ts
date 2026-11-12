@@ -50,6 +50,7 @@ export {
 
 // Normalization and redaction, for a caller that wants the pieces.
 export {
+  detectSource,
   isSource,
   NORMALIZER,
   NormalizeError,

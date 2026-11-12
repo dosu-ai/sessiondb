@@ -2,14 +2,15 @@
  * job; this module applies the fixups its adapters need (Claude Code's background-task input,
  * Codex's inherited history and subagent reports, an ATIF document's harness and tool errors),
  * runs the adapter, and redacts. The one source it has no adapter for, a Datadog Trajectory
- * session stream, has its own here. String in, records out.
+ * session stream, has its own here, and records already in trajectory-v1 pass through checked.
+ * String in, records out.
  *
  * A transcript can come in whole or as a chunk: the bytes of a log past a point already
  * normalized. A chunk is normalized on its own and yields the records those lines stand for,
  * without the meta record (the session's meta was made from its first chunk) and without the
  * demand that it hold a conversation. The Letta adapters do this through their canonical API
  * (`partial` source context), whose records are the same trajectory-v1 records; the Datadog
- * adapter has its own partial mode. Cut at a line boundary, a log's chunks normalize to exactly
+ * adapter has its own partial mode, and trajectory-v1 records drop their meta record. Cut at a line boundary, a log's chunks normalize to exactly
  * the records the whole log does, in order. */
 
 import {
@@ -25,6 +26,9 @@ import { ATIF, unsupportedAtifVersion, withAtifDetails } from "./atif";
 import { markClaudeInputs, markedAsObservations } from "./claude-inputs";
 import { subagentReportsAsObservations, withoutInheritedHistory } from "./codex-rollout";
 import { DATADOG_TRAJECTORY, normalizeDatadogTrajectory } from "./datadog-trajectory";
+import { TRAJECTORY, trajectoryRecords } from "./trajectory";
+
+export { detectSource } from "./detect";
 
 /** What a stored trace records as its normalizer: this SDK's release plus the
  * `@letta-ai/trajectory` it ran, as semver build metadata. Either changing can change the
@@ -48,10 +52,10 @@ const LETTA_SOURCES = [
   ATIF,
 ] as const satisfies readonly TranscriptTrajectorySource[];
 
-/** The transcript formats this server accepts: the native logs, an ATIF document, and a Datadog
- * Trajectory session stream. The name is also the `agent` a client sends and what the archive
- * id is derived from. */
-export const SOURCES = [...LETTA_SOURCES, DATADOG_TRAJECTORY] as const;
+/** The transcript formats this server accepts: the native logs, an ATIF document, a Datadog
+ * Trajectory session stream, and records already in trajectory-v1 (JSONL). The name is also the
+ * `agent` a client sends and what the archive id is derived from. */
+export const SOURCES = [...LETTA_SOURCES, DATADOG_TRAJECTORY, TRAJECTORY] as const;
 
 export type Source = (typeof SOURCES)[number];
 
@@ -133,10 +137,14 @@ function lettaChunk(source: LettaSource, transcript: string, chunk: Chunk): Norm
 }
 
 /** The records of one transcript before redaction: the Datadog stream through its own adapter,
- * every native log through `@letta-ai/trajectory` with its fixups around it. */
+ * trajectory-v1 records as they are, every native log through `@letta-ai/trajectory` with its
+ * fixups around it. */
 function recordsOf(source: Source, transcript: string, chunk?: Chunk): NormalizedRecord[] {
   if (source === DATADOG_TRAJECTORY) {
     return normalizeDatadogTrajectory(transcript, { partial: chunk !== undefined });
+  }
+  if (source === TRAJECTORY) {
+    return trajectoryRecords(transcript, { partial: chunk !== undefined });
   }
   if (source === ATIF) {
     // The adapter refuses any version past v1.7 with the message it gives every unreadable

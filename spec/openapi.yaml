@@ -335,8 +335,9 @@ components:
         derives from it. `datadog-trajectory` is a Datadog Trajectory session file, whichever
         client the daemon captured. `atif` is an ATIF-v1.0 through ATIF-v1.7 document (Harbor's
         Agent Trajectory Interchange Format), whichever harness exported it; it is sent whole,
-        as `json`, and its trace's `source` is the document's `agent.name`.
-      enum: [claude-code, codex, cursor, opencode, pi, gemini-cli, atif, datadog-trajectory]
+        as `json`, and its trace's `source` is the document's `agent.name`. `trajectory` is
+        JSONL of records already in Letta trajectory-v1, checked and redacted, not normalized.
+      enum: [claude-code, codex, cursor, opencode, pi, gemini-cli, atif, datadog-trajectory, trajectory]
 
     Owner:
       type: string
