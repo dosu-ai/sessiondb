@@ -1,3 +1,10 @@
+# [0.6.0](https://github.com/dosu-ai/sessiondb/compare/v0.5.0...v0.6.0) (2026-11-12)
+
+
+### Features
+
+* **sdk:** detect a transcript's source; pass trajectory records through ([aa32eef](https://github.com/dosu-ai/sessiondb/commit/aa32eefee91cb929bfd56ceb8196e4a744c242ab))
+
 # [0.5.0](https://github.com/dosu-ai/sessiondb/compare/v0.4.1...v0.5.0) (2026-11-10)
 
 
