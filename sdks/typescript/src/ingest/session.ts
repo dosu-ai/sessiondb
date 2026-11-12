@@ -31,10 +31,18 @@ import {
   type Source,
 } from "../normalize";
 import { redactRaw } from "../redact/raw";
-import type { NormalizedState, RawFormat, RawPart, SessionMetadata } from "../schemas/store";
+import type {
+  NormalizedState,
+  RawFormat,
+  RawPart,
+  SessionMetadata,
+  TraceFormat,
+} from "../schemas/store";
 import type { NormalizedRecord } from "../schemas/trajectory";
 import { keys } from "../store/layout";
+import { ensureLayout, markerFormat } from "../store/publish";
 import type { Store } from "../store/store";
+import { fromOtlp, otlpMeta } from "../trace/otlp";
 import { copiedPrefix, planShipment, type ShippedPrefix } from "./continuation";
 import { IngestRejected, OffsetMismatch, SessionRejected } from "./errors";
 import {
@@ -74,7 +82,14 @@ export interface SessionOptions {
   /** Identifies the writer in the layout marker. */
   client?: string;
   now?: () => Date;
+  /** How traces are written: `letta` (trajectory-v1 records, the default) or `otlp` (GenAI
+   * spans). A new store records it in its layout marker; an existing one must match it, so a
+   * writer that did not opt in to `otlp` never writes an `otlp` store. */
+  format?: TraceFormat;
 }
+
+/** `SessionOptions` once the store's format is known. */
+type Resolved = SessionOptions & { format: TraceFormat };
 
 /** What the client keeps after the call, whatever was written: its shipped prefix, and where
  * the next chunk starts. */
@@ -99,17 +114,29 @@ function recordedBranch(value: unknown): string | undefined {
   return branch && branch !== "HEAD" ? branch : undefined;
 }
 
-/** What a fork copied from the session it was made from, when that parent is stored here. */
+/** What a fork copied from the session it was made from, when that parent is stored here. In
+ * an `otlp` store the parent's records are read back from its spans. */
 async function forkCopy(
   store: Store,
   owner: string,
-  agent: string,
+  agent: Source,
   forkOf: string | undefined,
   records: NormalizedRecord[],
+  format: TraceFormat,
 ) {
   if (!forkOf) return undefined;
   const parent = await getSession(store, owner, agent, forkOf);
   if (!parent?.head) return undefined;
+  if (format === "otlp") {
+    const head = await getTrace(store, owner, parent.archive_id, parent.head, "otlp");
+    let parentRecords: NormalizedRecord[] | null = null;
+    try {
+      parentRecords = head ? fromOtlp(head).records : null;
+    } catch {
+      parentRecords = null;
+    }
+    return copiedPrefix(records, parentRecords);
+  }
   const trace = await getTrace(store, owner, parent.archive_id, parent.head);
   return copiedPrefix(records, trace?.records ?? null);
 }
@@ -170,7 +197,7 @@ function logEnd(parts: readonly RawPart[]): number {
 /** The second step on its own: the stored raw to a trace. */
 async function normalizeStored(
   input: NormalizeStoredInput,
-  options: SessionOptions,
+  options: Resolved,
 ): Promise<NormalizeStoredResult> {
   const { store } = options;
   const { owner, agent, session_id: sessionId } = input;
@@ -199,9 +226,9 @@ async function normalizeStored(
 async function wholeStored(
   input: NormalizeStoredInput,
   metadata: SessionMetadata,
-  options: SessionOptions,
+  options: Resolved,
 ): Promise<NormalizeStoredResult> {
-  const { store, client, now } = options;
+  const { store, client, now, format } = options;
   const { owner, agent, session_id: sessionId } = input;
   const parts = inLogOrder(metadata.raw);
   const chunks: string[] = [];
@@ -227,7 +254,7 @@ async function wholeStored(
   // answer); the planner picks the tail, and falls back to the whole session when the prefix
   // no longer matches. A fork's copy of its parent's history is the parent's to ship.
   let plan = input.shipped ? planShipment(records, input.shipped) : { records, fresh: records };
-  const copied = await forkCopy(store, owner, agent, input.fork_of, records);
+  const copied = await forkCopy(store, owner, agent, input.fork_of, records, format);
   if (!plan.continuation && copied) plan = planShipment(records, copied);
   if (isTrivialTrajectory(plan.fresh)) {
     await recordNormalized({ store, owner, agent, session_id: sessionId, normalized, now });
@@ -254,6 +281,7 @@ async function wholeStored(
     normalized,
     client,
     now,
+    format,
   });
   return { ...result, ...whole };
 }
@@ -263,9 +291,9 @@ async function continueStored(
   input: NormalizeStoredInput,
   metadata: SessionMetadata,
   stored: RawPart,
-  options: SessionOptions,
+  options: Resolved,
 ): Promise<NormalizeStoredResult> {
-  const { store, client, now } = options;
+  const { store, client, now, format } = options;
   const { owner, agent, session_id: sessionId } = input;
   const state = metadata.normalized as NormalizedState;
   const offset = stored.offset;
@@ -298,9 +326,18 @@ async function continueStored(
     hash_state: hash.export(),
   };
 
-  // The session's meta record is the head's: a chunk has none of its own.
-  const head = await getTrace(store, owner, metadata.archive_id, metadata.head as string);
-  const meta = head?.records[0]?.role === "meta" ? [head.records[0]] : [];
+  // The session's meta record is the head's: a chunk has none of its own. An OTLP head carries
+  // it on its resource.
+  const head = await getTrace(store, owner, metadata.archive_id, metadata.head as string, format);
+  const headMeta =
+    head === null
+      ? undefined
+      : "resourceSpans" in head
+        ? otlpMeta(head)
+        : head.records[0]?.role === "meta"
+          ? head.records[0]
+          : undefined;
+  const meta = headMeta ? [headMeta] : [];
 
   const result = await ingest({
     store,
@@ -318,6 +355,7 @@ async function continueStored(
     normalized,
     client,
     now,
+    format,
   });
   return {
     ...result,
@@ -331,9 +369,13 @@ async function continueStored(
  * must start where the session's log ends, else `OffsetMismatch` and nothing is stored. */
 export async function storeSession(
   upload: SessionUpload,
-  options: SessionOptions,
+  sessionOptions: SessionOptions,
 ): Promise<StoreSessionResult> {
-  const { store, client, now } = options;
+  const { store, client, now } = sessionOptions;
+  const traceFormat = markerFormat(
+    await ensureLayout(store, client ?? "sessionstorage", sessionOptions.format ?? "letta"),
+  );
+  const options: Resolved = { ...sessionOptions, format: traceFormat };
   const { owner, agent, session_id: sessionId, transcript, format } = upload;
   const offset = upload.offset ?? 0;
   const length = new TextEncoder().encode(transcript).length;
@@ -371,6 +413,7 @@ export async function storeSession(
     whole: offset === 0,
     client,
     now,
+    trace_format: traceFormat,
   });
   const result = await normalizeStored({ ...upload, part }, options);
   return { ...result, raw };

@@ -6,12 +6,14 @@
  * → publish trace → swap `metadata.json` → change entry. `tombstone` undoes both. Redaction
  * happened in `redactRaw` and `normalizeTranscript`; the hash is over what the latter produced. */
 
+import type { OtlpTrace } from "../schemas/otlp";
 import {
   METADATA_SCHEMA,
   type NormalizedState,
   type RawFormat,
   type SessionMetadata,
   type SessionTraceRef,
+  type TraceFormat,
 } from "../schemas/store";
 import type { Trace, TraceMetadata } from "../schemas/trace";
 import { type NormalizedRecord, TrajectoryError } from "../schemas/trajectory";
@@ -22,12 +24,15 @@ import {
   ensureLayout,
   gunzipJson,
   gzipJson,
+  layoutFormat,
+  markerFormat,
   publishObject,
   readMetadata,
   sha256,
   swapMetadata,
 } from "../store/publish";
 import type { Store } from "../store/store";
+import { toOtlp } from "../trace/otlp";
 import { parseTrajectory } from "../trace/parse";
 import { IngestRejected } from "./errors";
 import { LIMITS } from "./limits";
@@ -56,6 +61,9 @@ export interface IngestInput {
   now?: () => Date;
   /** Where the session's log stands once these records are in, written with the pointer. */
   normalized?: NormalizedState;
+  /** How the trace object is written, default `letta`; refused when the store holds the
+   * other. */
+  format?: TraceFormat;
 }
 
 export interface IngestResult {
@@ -103,7 +111,9 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
 
   const archive = archiveId(owner, metadata.agent, metadata.session_id);
   const at = now().toISOString();
-  await ensureLayout(store, input.client ?? "sessionstorage");
+  const format = markerFormat(
+    await ensureLayout(store, input.client ?? "sessionstorage", input.format ?? "letta"),
+  );
 
   const existing = await readMetadata(store, owner, archive);
   if (existing?.status === "redacted") {
@@ -113,8 +123,8 @@ export async function ingest(input: IngestInput): Promise<IngestResult> {
 
   const outcome = await publishObject(
     store,
-    keys.trace(owner, archive, trace.content_hash),
-    gzipJson(trace),
+    keys.trace(owner, archive, trace.content_hash, format),
+    gzipJson(format === "otlp" ? toOtlp(trace) : trace),
     "application/gzip",
   );
 
@@ -198,6 +208,9 @@ export interface PutRawInput {
   /** Identifies the writer in the layout marker. */
   client?: string;
   now?: () => Date;
+  /** The trace format a new store's layout marker records, default `letta`; checked against an
+   * existing one. */
+  trace_format?: TraceFormat;
 }
 
 export type PutRawResult = { status: "stored" | "exists"; part: number };
@@ -213,7 +226,7 @@ export async function putRaw(input: PutRawInput): Promise<PutRawResult> {
   if (!Number.isInteger(part) || part < 0) throw new IngestRejected("invalid", "part must be ≥ 0");
   const archive = archiveId(owner, input.agent, input.session_id);
   const at = (input.now ?? (() => new Date()))().toISOString();
-  await ensureLayout(store, input.client ?? "sessionstorage");
+  await ensureLayout(store, input.client ?? "sessionstorage", input.trace_format ?? "letta");
   const existing = await readMetadata(store, owner, archive);
   if (existing?.status === "redacted") {
     throw new IngestRejected("redacted", "session was redacted");
@@ -290,6 +303,8 @@ export interface TombstoneInput {
   agent: string;
   session_id: string;
   now?: () => Date;
+  /** The store's trace format; read from its layout marker when omitted. */
+  format?: TraceFormat;
 }
 
 /** Remove a session's trace and raw objects and mark it redacted. Irreversible; a later ingest
@@ -299,9 +314,10 @@ export async function tombstone(input: TombstoneInput): Promise<{ removed: numbe
   const archive = archiveId(owner, input.agent, input.session_id);
   const existing = await readMetadata(store, owner, archive);
   if (!existing) return null;
+  const format = await layoutFormat(store, input.format);
   let removed = 0;
   for (const t of existing.traces) {
-    await store.delete(keys.trace(owner, archive, t.content_hash));
+    await store.delete(keys.trace(owner, archive, t.content_hash, format));
     removed++;
   }
   for (const r of existing.raw) {
@@ -324,14 +340,42 @@ export async function tombstone(input: TombstoneInput): Promise<{ removed: numbe
 
 // --- read side ----------------------------------------------------------------
 
+/** A trace object as stored: a `Trace` in a `letta` store, an `OtlpTrace` in an `otlp` one
+ * (`isOtlpTrace` tells them apart). */
+export type StoredTrace = Trace | OtlpTrace;
+
+/** One trace object, in the format given (default `letta`): the format picks the key, so asking
+ * a store for the format it does not hold finds nothing. */
 export async function getTrace(
   store: Store,
   owner: string,
   archive: string,
   contentHash: string,
-): Promise<Trace | null> {
-  const bytes = await store.get(keys.trace(owner, archive, contentHash));
-  return bytes === null ? null : gunzipJson<Trace>(bytes);
+  format?: "letta",
+): Promise<Trace | null>;
+export async function getTrace(
+  store: Store,
+  owner: string,
+  archive: string,
+  contentHash: string,
+  format: "otlp",
+): Promise<OtlpTrace | null>;
+export async function getTrace(
+  store: Store,
+  owner: string,
+  archive: string,
+  contentHash: string,
+  format: TraceFormat,
+): Promise<StoredTrace | null>;
+export async function getTrace(
+  store: Store,
+  owner: string,
+  archive: string,
+  contentHash: string,
+  format: TraceFormat = "letta",
+): Promise<StoredTrace | null> {
+  const bytes = await store.get(keys.trace(owner, archive, contentHash, format));
+  return bytes === null ? null : gunzipJson<StoredTrace>(bytes);
 }
 
 export async function getSession(

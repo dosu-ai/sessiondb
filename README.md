@@ -144,6 +144,26 @@ Every write is verified (ETag against MD5 where the service reports one, a read-
 before the pointer and change feed are updated, so a reader never sees a change entry for an
 object that is not there.
 
+## Trace format
+
+Every input is normalized the same way. What the trace objects are written as is a choice,
+`SESSIONDB_FORMAT` on the server or `format` on the SDK client:
+
+| Format | Trace object |
+|---|---|
+| `letta` (default) | `sessionstorage/trace/1`: the [Letta trajectory-v1](https://github.com/letta-ai/trajectory) records, their events and hash |
+| `otlp` | The same trace as an OTLP/HTTP JSON `ExportTraceServiceRequest`: OpenTelemetry GenAI spans (`invoke_agent`, a `chat` span per model turn, an `execute_tool` span per tool call) that any OpenTelemetry backend reads, and that can be posted as-is to a collector |
+
+```ts
+const db = connect({ store: "r2://sessions/team", owner: "alice", format: "otlp" });
+```
+
+A bucket holds one format, recorded in its layout marker by its first writer; a writer
+configured for the other refuses it. Writers default to `letta`, so only a writer that opts in
+writes an `otlp` bucket; reads follow whatever the bucket holds. Redaction, dedupe, chunks and forks work the same in both.
+An `otlp` object is lossless: its spans carry the records they were made from, so `fromOtlp(trace)` gives back the `letta` trace with the same `content_hash`. Readers that only know `letta` (Dosu's backend) convert this way. Trajectory-v1 has no token usage, so OTLP spans carry none. See
+[`spec/layout.md`](spec/layout.md) for both objects.
+
 ## Access model
 
 A token is bound to a name and every request is scoped to `owners/<name>/` in the bucket. Two

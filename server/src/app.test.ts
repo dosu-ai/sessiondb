@@ -121,7 +121,7 @@ describe("auth", () => {
     ]) {
       const res = await call("GET", "/v1/me", { token });
       expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ owner, storage: { url: store.url } });
+      expect(await res.json()).toEqual({ owner, storage: { url: store.url }, format: "letta" });
     }
   });
 
@@ -170,7 +170,11 @@ describe("auth", () => {
     it("accepts a token the secret signed, as the owner it names", async () => {
       const res = await call("GET", "/v1/me", { token: mint("u-42") });
       expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ owner: "u-42", storage: { url: store.url } });
+      expect(await res.json()).toEqual({
+        owner: "u-42",
+        storage: { url: store.url },
+        format: "letta",
+      });
     });
 
     it("scopes it to that owner's folder, like a listed token", async () => {

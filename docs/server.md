@@ -48,6 +48,7 @@ session.
 | `SESSIONDB_STORE_URL` | yes | `r2://bucket/prefix`, `s3://bucket/prefix`, or `file:///path` |
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | for `r2://` | |
 | `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | for `s3://` | Or Bun's `S3_*` equivalents; `S3_ENDPOINT` for MinIO, Backblaze, Wasabi… |
+| `SESSIONDB_FORMAT` | | How traces are written: `letta` (default), trajectory-v1 records, or `otlp`, OTLP/HTTP JSON GenAI spans that any OpenTelemetry backend reads. A bucket holds one format, fixed by its first writer; the server refuses to start against a bucket in the other. See [the layout](../spec/layout.md#sessionstoragejson--sessionstoragelayout1) |
 | `PORT` | | Default `7200` |
 
 Put TLS in front of it (a reverse proxy, Cloud Run, a load balancer): transcripts arrive
@@ -109,11 +110,11 @@ Request bodies may be `Content-Encoding: gzip` (any other encoding is a `415`). 
 | | |
 |---|---|
 | `GET /healthz` | `{ok, version}`, no auth |
-| `GET /v1/me` | `{owner, storage: {url, region?, account_id?, endpoint?}}`: which bucket this server writes, so a client can point a reader at it. Never a secret |
+| `GET /v1/me` | `{owner, storage: {url, region?, account_id?, endpoint?}, format}`: which bucket this server writes and in which trace format, so a client can point a reader at it. Never a secret |
 | `POST /v1/sessions` | Store a session; see below |
 | `GET /v1/sessions?limit&after` | List |
 | `GET /v1/sessions/:agent/:session_id` | The session's `metadata.json` |
-| `GET /v1/sessions/:agent/:session_id/trace?hash` | The head trace (or a specific one); `404 no_trace` while raw only, `410` once redacted |
+| `GET /v1/sessions/:agent/:session_id/trace?hash` | The head trace (or a specific one), in the bucket's format; `404 no_trace` while raw only, `410` once redacted |
 | `DELETE /v1/sessions/:agent/:session_id` | Tombstone: drop trace and raw objects, append a tombstone change. Irreversible; a later upload of the same session is refused |
 | `GET /v1/changes?after&since&limit` | The change feed |
 

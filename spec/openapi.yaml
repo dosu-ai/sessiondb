@@ -75,6 +75,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Identity" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "502": { $ref: "#/components/responses/StorageError" }
 
   /v1/sessions:
     post:
@@ -219,7 +220,11 @@ paths:
           description: The trace.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Trace" }
+              schema:
+                description: In the bucket's format (`Identity.format`).
+                oneOf:
+                  - { $ref: "#/components/schemas/Trace" }
+                  - { $ref: "#/components/schemas/OtlpTrace" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404":
           description: |
@@ -488,6 +493,14 @@ components:
       properties:
         owner: { $ref: "#/components/schemas/Owner" }
         storage: { $ref: "#/components/schemas/StorageView" }
+        format: { $ref: "#/components/schemas/TraceFormat" }
+
+    TraceFormat:
+      type: string
+      enum: [letta, otlp]
+      description: |
+        How the bucket's traces are written: `letta` (`Trace`, trajectory-v1 records) or `otlp`
+        (`OtlpTrace`, OTLP/HTTP JSON GenAI spans). One bucket holds one format.
 
     StorageView:
       type: object
@@ -689,6 +702,74 @@ components:
                 name: { type: string, description: What produced `records`; the SDK. }
                 version: { type: string, description: Its release, with the `@letta-ai/trajectory` it ran as build metadata. }
           additionalProperties: true
+
+    OtlpTrace:
+      type: object
+      description: |
+        `trace.<content_hash>.otlp.json.gz`, decoded, in an `otlp` bucket: an OTLP/HTTP JSON
+        `ExportTraceServiceRequest` of the trace as GenAI spans, as in `layout.md`. It can be
+        posted as-is to a collector's `/v1/traces`.
+      required: [resourceSpans]
+      properties:
+        resourceSpans:
+          type: array
+          items:
+            type: object
+            required: [resource, scopeSpans]
+            properties:
+              resource:
+                type: object
+                required: [attributes]
+                properties:
+                  attributes: { type: array, items: { $ref: "#/components/schemas/OtlpKeyValue" } }
+              scopeSpans:
+                type: array
+                items:
+                  type: object
+                  required: [scope, spans]
+                  properties:
+                    scope:
+                      type: object
+                      required: [name, version]
+                      properties:
+                        name: { type: string }
+                        version: { type: string }
+                    spans: { type: array, items: { $ref: "#/components/schemas/OtlpSpan" } }
+
+    OtlpKeyValue:
+      type: object
+      required: [key, value]
+      properties:
+        key: { type: string }
+        value:
+          type: object
+          minProperties: 1
+          maxProperties: 1
+          properties:
+            stringValue: { type: string }
+            boolValue: { type: boolean }
+            intValue: { type: string, pattern: "^-?[0-9]+$" }
+            doubleValue: { type: number }
+          additionalProperties: false
+
+    OtlpSpan:
+      type: object
+      required: [traceId, spanId, name, kind, startTimeUnixNano, endTimeUnixNano, attributes, status]
+      properties:
+        traceId: { type: string, pattern: "^[0-9a-f]{32}$" }
+        spanId: { type: string, pattern: "^[0-9a-f]{16}$" }
+        parentSpanId: { type: string, pattern: "^[0-9a-f]{16}$" }
+        name: { type: string }
+        kind: { type: integer, description: "`1` internal, `3` client." }
+        startTimeUnixNano: { type: string, pattern: "^[0-9]+$" }
+        endTimeUnixNano: { type: string, pattern: "^[0-9]+$" }
+        attributes: { type: array, items: { $ref: "#/components/schemas/OtlpKeyValue" } }
+        status:
+          type: object
+          required: [code]
+          properties:
+            code: { type: integer, enum: [0, 1, 2] }
+            message: { type: string }
 
     ChangeEntry:
       type: object
