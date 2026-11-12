@@ -264,8 +264,10 @@ the server applies these rules:
 
 - **Whole documents only.** An ATIF document is one JSON value, so a chunk (`offset` > 0) gets
   `422 bad_chunk` whatever `format` says. A session that grew is sent whole again, with `shipped`.
-- **ATIF-v1.0 through ATIF-v1.7.** A later version is stored raw and refused with
-  `422 normalize_invalid_input`; the message names the version.
+- **ATIF-v1.0 through ATIF-v1.8.** A later version is stored raw and refused with
+  `422 normalize_invalid_input`; the message names the version. The adapter reads up to v1.7;
+  a v1.8 document is handed to it as v1.7, its `audio` content parts (the one v1.8 addition)
+  turned into the text `[audio]`, as the adapter writes `[image]` for an image.
 - **The harness comes from `agent.name`.** The session is filed under `agent: atif`, and the
   archive id derives from that. The trace's `source` is the document's `agent.name`
   (`claude-code`, `codex`, `copilot-cli`), or `atif` when the name is blank or holds control
