@@ -123,7 +123,8 @@ Request bodies may be `Content-Encoding: gzip` (any other encoding is a `415`). 
 {
   "agent": "claude-code",          // the transcript format: claude-code, codex, cursor, opencode, pi, gemini-cli,
                                    // datadog-trajectory (a Trajectory session file, see below),
-                                   // or atif (an ATIF document, see below)
+                                   // atif (an ATIF document, see below), or trajectory
+                                   // (records already in trajectory-v1, see below)
   "session_id": "…",
   "transcript": "…",               // the native log, verbatim
   "format": "jsonl",               // or "json" (OpenCode exports, ATIF); how the raw copy is redacted
@@ -279,3 +280,21 @@ the server applies these rules:
 The adapter also drops system steps (as it does for every source), metrics, costs, token ids,
 logprobs and `extra` fields. The document's `cwd` and `git_branch` do not reach the trace, so
 send `project` and `branch` with the upload.
+
+### Trajectory-v1 records
+
+A log that is already Letta trajectory-v1, one record per line, is posted as
+`agent: "trajectory"`, whole or in chunks. Nothing normalizes it: each line is parsed and checked
+(a line that is not JSON, or a record that is not trajectory-v1, gets `422
+normalize_invalid_input`), then redacted like any other source's records. A chunk's `meta`
+record is dropped, as for every other chunk. The trace's `source` is what the records' `meta`
+says.
+
+### Which agent wrote it
+
+A caller that holds logs without knowing which agent wrote them (a bucket of them, say) can
+ask the SDK: `detectSource(sample)` takes the start of one file (64 KiB is plenty; a last line
+cut short is ignored, and an ATIF, OpenCode or Gemini CLI document is read from its opening
+keys) and returns the `agent` to post it as, or `null` when the sample matches no format or more
+than one. It tells apart every format above except that pi's session format is shared by its
+forks (OMP, OpenClaw), which it reports as `pi`.
