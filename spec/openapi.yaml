@@ -586,6 +586,13 @@ components:
           items: { $ref: "#/components/schemas/RawPart" }
         raw_format: { type: string, enum: [jsonl, json] }
         normalized: { $ref: "#/components/schemas/NormalizedState" }
+        withheld_calls:
+          type: object
+          description: >-
+            Tool calls whose results are redacted whole, by id: they touched a sensitive file or
+            ran a command that prints a secret. Kept so a result in a later chunk is redacted
+            too. Absent when there are none.
+          additionalProperties: { type: string, enum: [sensitive-file, secret-output] }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
 

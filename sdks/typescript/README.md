@@ -79,4 +79,7 @@ The HTTP backend takes `timeoutMs` (default 120 s per request, 0 to disable), `u
 `storeSession`, `getSession`, `getTrace`, `listSessions`, `readChanges` and `tombstone` are the
 pipeline over a `Store` without the client; `normalizeTranscript`, `redactRaw`, `redactRecords`
 and `parseTrajectory` are its pieces. `detectSource(sample)` names a transcript's format (the
-`agent` to post it as) from the start of the file, or `null` when it cannot tell. `spec/testdata/goldens/` pins what they produce.
+`agent` to post it as) from the start of the file, or `null` when it cannot tell.
+`redactionRules({ patterns, sensitive_files, secret_commands })` adds your own redaction to the
+built-in rules; pass it as `redaction` to `connect` (with a store) or `storeSession`.
+`redactSensitive` and `redactTranscriptPatterns` are those passes alone. `spec/testdata/goldens/` pins what they produce.

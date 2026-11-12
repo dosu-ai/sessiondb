@@ -48,11 +48,51 @@ session.
 | `SESSIONDB_STORE_URL` | yes | `r2://bucket/prefix`, `s3://bucket/prefix`, or `file:///path` |
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | for `r2://` | |
 | `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | for `s3://` | Or Bun's `S3_*` equivalents; `S3_ENDPOINT` for MinIO, Backblaze, Wasabi… |
+| `SESSIONDB_REDACTION_FILE` | | A JSON file of your own redaction rules, added to the built-in ones ([below](#your-own-redaction)). The server refuses to start if a pattern in it is not a usable regular expression |
 | `SESSIONDB_FORMAT` | | How traces are written: `letta` (default), trajectory-v1 records, or `otlp`, OTLP/HTTP JSON GenAI spans that any OpenTelemetry backend reads. A bucket holds one format, fixed by its first writer; the server refuses to start against a bucket in the other. See [the layout](../spec/layout.md#sessionstoragejson--sessionstoragelayout1) |
 | `PORT` | | Default `7200` |
 
 Put TLS in front of it (a reverse proxy, Cloud Run, a load balancer): transcripts arrive
 unredacted and the server is where that stops being true.
+
+### Your own redaction
+
+Every session goes through three passes before anything is written, in this order:
+
+1. **Sensitive tool calls.** When a call reads or writes a secrets file (`.env`, a private key,
+   `~/.aws/credentials`, Terraform state and the like) or runs a command whose job is to print a
+   secret (`printenv`, `gh auth token`, `kubectl get secret`, `aws configure get`, `vault kv get`,
+   `op read`, …), the call is kept and its result becomes `[redacted:sensitive-file]` or
+   `[redacted:secret-output]`. A file is recognized by a call's path arguments, a shell command's
+   words, or a patch's file headers, not by text that only mentions it. A result in a later chunk
+   than its call is caught too: the session's `metadata.json` keeps the withheld calls' ids.
+2. **Your patterns**, if you have any: a match becomes `[redacted:custom-pattern]`.
+3. **The built-in secret patterns**: provider tokens, credential assignments, bearer headers,
+   JWTs, connection URLs, private-key blocks, and the entropy pass.
+
+The first and last always run. `SESSIONDB_REDACTION_FILE` adds to them, and nothing in it can
+take a built-in away:
+
+```json
+{
+  "patterns": ["ACME-[0-9A-F]{32}", "internal-key: (?<secret>\\S+)"],
+  "sensitive_files": ["config/master.key", "secrets/**", "!secrets/README.md"],
+  "secret_commands": ["acme-cli\\s+token\\b"]
+}
+```
+
+- `patterns` are JavaScript regular expressions, run over every string in the transcript. With
+  a named group `secret`, only that group is replaced, so the second one above keeps
+  `internal-key: `.
+- `sensitive_files` are `.gitignore`-style globs: without a `/` a file's name in any directory,
+  with one the end of its path; `**` crosses directories; `!` makes an exception.
+- `secret_commands` are regular expressions matched at the start of each command in a shell
+  line (after `;`, `&&`, `|`, `$(`, `sudo`, `VAR=value`).
+
+This is the file Dosu's CLI keeps for an org's rules, so an org's list can be pasted here as
+it is; the CLI's `excluded` and `names_only` lists are about the member's machine and are
+ignored. The rules apply to sessions stored after the server restarts with them; what is
+already in the bucket is not rewritten.
 
 ### Deploying
 

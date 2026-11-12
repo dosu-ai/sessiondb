@@ -1,6 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { gunzipSync } from "node:zlib";
 import {
   archiveId,
   FsStore,
@@ -10,6 +11,7 @@ import {
   normalizeTranscript,
   prefixSha256,
   readMetadata,
+  redactionRules,
 } from "@dosu/sessiondb";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type App, createApp } from "./app";
@@ -302,6 +304,25 @@ describe("sessions", () => {
     const changes = await call("GET", "/v1/changes", { token });
     const feed = (await changes.json()) as { entries: { entry: { kind: string } }[] };
     expect(feed.entries.map((e) => e.entry.kind)).toEqual(["published"]);
+  });
+
+  it("applies the operator's redaction to every session it stores", async () => {
+    app = createApp({
+      store,
+      storage: { url: store.url },
+      tokens: [{ token: TOKEN, owner: "acme" }],
+      redaction: redactionRules({ patterns: ["The auth (?<secret>flow)"] }),
+    });
+    const res = await call("POST", "/v1/sessions", {
+      token: TOKEN,
+      body: { agent: "claude-code", session_id: "sess-own", transcript: CLAUDE },
+    });
+    expect(res.status).toBe(201);
+    const archive = archiveId("acme", "claude-code", "sess-own");
+    const raw = gunzipSync((await store.get(keys.raw("acme", archive, 0, "jsonl"))) as Uint8Array);
+    const text = new TextDecoder().decode(raw);
+    expect(text).toContain("The auth [redacted:custom-pattern]");
+    expect(text).not.toContain("The auth flow");
   });
 
   it("accepts a gzipped body; the raw copy is always stored, and stored first", async () => {

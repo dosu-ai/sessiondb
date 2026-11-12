@@ -17,6 +17,7 @@ import {
   isSource,
   OffsetMismatch,
   type RawFormat,
+  type RedactionRules,
   SessionRejected,
   SOURCES,
   type Source,
@@ -51,6 +52,8 @@ export interface AppOptions {
   /** Identifies this server in layout markers (`sessiondb-server/0.1.0`). */
   client?: string;
   now?: () => Date;
+  /** The operator's redaction, added to the built-in rules for every session. */
+  redaction?: RedactionRules;
   /** How traces are written to the bucket: `letta` (the default) or `otlp`. The bucket's
    * layout marker must agree. */
   format?: TraceFormat;
@@ -187,7 +190,15 @@ export function createApp(options: AppOptions) {
   function clientFor(owner: string): StoreSessionDB {
     let db = clients.get(owner);
     if (!db) {
-      db = new StoreSessionDB({ store, storage, owner, client, now, format: options.format });
+      db = new StoreSessionDB({
+        store,
+        storage,
+        owner,
+        client,
+        now,
+        redaction: options.redaction,
+        format: options.format,
+      });
       clients.set(owner, db);
     }
     return db;

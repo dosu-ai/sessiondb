@@ -15,6 +15,10 @@
  * - bucket credentials     `s3://`: `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` (or `S3_*`),
  *                          `AWS_REGION`; `r2://`: `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`,
  *                          `R2_SECRET_ACCESS_KEY`; S3-compatible: `S3_ENDPOINT` with the `AWS_*` keys
+ * - `SESSIONDB_REDACTION_FILE`
+ *                          optional: a JSON file of the operator's own redaction, added to the
+ *                          built-in rules (`patterns`, `sensitive_files`, `secret_commands`;
+ *                          see docs/server.md). The server refuses to start on a bad pattern
  * - `SESSIONDB_FORMAT`     how traces are written: `letta` (default; trajectory-v1 records) or
  *                          `otlp` (OTLP/HTTP JSON GenAI spans). A bucket holds one format, set
  *                          by its first writer; the server refuses to start on the other
@@ -26,7 +30,9 @@ import {
   ensureLayout,
   isTraceFormat,
   openStore,
+  parseRedactionConfig,
   probe,
+  type RedactionRules,
   type StorageView,
   type Store,
   TRACE_FORMATS,
@@ -86,6 +92,24 @@ const format: TraceFormat = formatSetting;
 
 const client = `sessiondb-server/${VERSION}`;
 
+let redaction: RedactionRules | undefined;
+const redactionFile = process.env.SESSIONDB_REDACTION_FILE?.trim();
+if (redactionFile) {
+  let text: string;
+  try {
+    text = await Bun.file(redactionFile).text();
+  } catch (err) {
+    fail(
+      `cannot read SESSIONDB_REDACTION_FILE: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  try {
+    redaction = parseRedactionConfig(text);
+  } catch (err) {
+    fail(`${redactionFile}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 let store: Store;
 let storage: StorageView;
 try {
@@ -102,7 +126,7 @@ try {
   fail(`cannot write to ${url}: ${err instanceof Error ? err.message : String(err)}`);
 }
 
-const app = createApp({ store, storage, tokens, tokenSecret, client, format });
+const app = createApp({ store, storage, tokens, tokenSecret, client, redaction, format });
 const port = Number.parseInt(process.env.PORT ?? "7200", 10);
 
 const server = Bun.serve({
@@ -118,6 +142,11 @@ const who = [...owners, ...(tokenSecret ? ["whoever holds a signed token"] : [])
 console.log(
   `sessiondb-server ${VERSION} listening on http://localhost:${server.port}, writing ${format} traces to ${url} for ${who}`,
 );
+if (redaction) {
+  console.log(
+    `redaction from ${redactionFile}: ${redaction.patterns.length} pattern(s) on top of the built-in rules`,
+  );
+}
 
 function shutdown(): void {
   server.stop();

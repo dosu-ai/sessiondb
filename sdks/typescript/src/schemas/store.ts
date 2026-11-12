@@ -71,6 +71,10 @@ export interface SessionMetadata {
   raw_format?: RawFormat;
   /** Where a chunked upload stands; absent until the session's first chunk is normalized. */
   normalized?: NormalizedState;
+  /** Tool calls whose results are withheld (they touched a sensitive file, or ran a command that
+   * prints a secret), by id, so a result in a later chunk than its call is replaced too. Absent
+   * when there are none. */
+  withheld_calls?: Record<string, "sensitive-file" | "secret-output">;
   created_at: string;
   updated_at: string;
 }

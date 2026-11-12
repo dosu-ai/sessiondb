@@ -17,7 +17,9 @@ import { gzipSync } from "node:zlib";
 import { OffsetMismatch, SessionRejected } from "./ingest/errors";
 import { getSession, getTrace, listSessions, type StoredTrace, tombstone } from "./ingest/ingest";
 import { type SessionUpload, type StoreSessionResult, storeSession } from "./ingest/session";
+import type { RedactionRules } from "./redact/rules";
 import type { SessionMetadata, TraceFormat } from "./schemas/store";
+import type { Trace } from "./schemas/trace";
 import { type ChangesPage, type ReadChangesOptions, readChanges } from "./store/changes";
 import { archiveId, assertOwner, LAYOUT_KEY } from "./store/layout";
 import { type OpenStoreOptions, openStore, type StorageView } from "./store/open";
@@ -80,6 +82,8 @@ export interface StoreClientOptions {
   /** Identifies this writer in the layout marker (`sessiondb-cli/0.2.0`). */
   client?: string;
   now?: () => Date;
+  /** Redaction added to the built-in rules (`redactionRules`). */
+  redaction?: RedactionRules;
   /** How traces are written: `letta` (trajectory-v1 records, the default) or `otlp` (GenAI
    * spans). A new store takes it; an existing one must hold it, so writing an `otlp` store
    * takes opting in. Reads (`getTrace`, `me`) follow whatever the store holds either way. */
@@ -93,6 +97,7 @@ export class StoreSessionDB implements SessionDB {
   private readonly storage: StorageView;
   private readonly client: string;
   private readonly now: () => Date;
+  private readonly redaction: RedactionRules | undefined;
   private readonly format: TraceFormat | undefined;
   private resolved: TraceFormat | undefined;
 
@@ -102,6 +107,7 @@ export class StoreSessionDB implements SessionDB {
     this.storage = options.storage ?? { url: options.store.url };
     this.client = options.client ?? `@dosu/sessiondb/${VERSION}`;
     this.now = options.now ?? (() => new Date());
+    this.redaction = options.redaction;
     this.format = options.format;
   }
 
@@ -124,7 +130,13 @@ export class StoreSessionDB implements SessionDB {
   ingest(upload: Upload): Promise<StoreSessionResult> {
     return storeSession(
       { ...upload, format: upload.format ?? "jsonl", owner: this.owner },
-      { store: this.store, client: this.client, now: this.now, format: this.format },
+      {
+        store: this.store,
+        client: this.client,
+        now: this.now,
+        redaction: this.redaction,
+        format: this.format,
+      },
     );
   }
 
@@ -358,6 +370,8 @@ export type ConnectOptions =
       store: Store | string;
       owner: string;
       client?: string;
+      /** Redaction added to the built-in rules (`redactionRules`). */
+      redaction?: RedactionRules;
       /** The trace format; see `StoreClientOptions.format`. */
       format?: TraceFormat;
     } & OpenStoreOptions);
@@ -367,10 +381,10 @@ export function connect(options: ConnectOptions): SessionDB {
   if ("server" in options) {
     return new HttpSessionDB(options);
   }
-  const { store: target, owner, client, format, ...open } = options;
+  const { store: target, owner, client, redaction, format, ...open } = options;
   if (typeof target === "string") {
     const { store, storage } = openStore(target, open);
-    return new StoreSessionDB({ store, storage, owner, client, format });
+    return new StoreSessionDB({ store, storage, owner, client, redaction, format });
   }
-  return new StoreSessionDB({ store: target, owner, client, format });
+  return new StoreSessionDB({ store: target, owner, client, redaction, format });
 }

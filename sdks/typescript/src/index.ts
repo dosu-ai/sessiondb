@@ -59,9 +59,41 @@ export {
   SOURCES,
   type Source,
 } from "./normalize";
+export {
+  type CompiledPatterns,
+  CUSTOM_PATTERN_KIND,
+  compilePatterns,
+  redactPatterns,
+  redactTranscriptPatterns,
+} from "./redact/patterns";
 export { redactRaw } from "./redact/raw";
 export { redactRecords } from "./redact/records";
+export {
+  applyRules,
+  parseRedactionConfig,
+  type RedactionConfig,
+  RedactionConfigError,
+  type RedactionRules,
+  redactionRules,
+} from "./redact/rules";
 export { type RedactionResult, redactSecrets } from "./redact/secrets";
+export {
+  BUILTIN_SECRET_COMMANDS,
+  BUILTIN_SENSITIVE_FILES,
+  type CompiledCommands,
+  isSensitivePath,
+  namesSensitiveFile,
+  redactSensitive,
+  runsSecretCommand,
+  type SensitiveFiles,
+  type SensitiveResult,
+  type SensitiveRules,
+  secretCommands,
+  sensitiveFiles,
+  sensitiveRules,
+  type WithheldCalls,
+  type WithheldKind,
+} from "./redact/sensitive";
 export type {
   OtlpAnyValue,
   OtlpKeyValue,
