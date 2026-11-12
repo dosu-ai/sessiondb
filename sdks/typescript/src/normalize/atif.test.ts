@@ -172,15 +172,58 @@ describe("ATIF documents", () => {
     });
   });
 
-  it("refuse ATIF-v1.8 and later, naming the version", () => {
-    for (const version of ["ATIF-v1.8", "ATIF-v2.0"]) {
+  it("read ATIF-v1.8, with an audio part as [audio] the way the adapter writes [image]", () => {
+    const audio = { type: "audio", source: { media_type: "audio/wav", path: "audio/a.wav" } };
+    const transcript = JSON.stringify({
+      schema_version: "ATIF-v1.8",
+      session_id: "s18",
+      agent: { name: "claude-code", version: "1" },
+      steps: [
+        {
+          step_id: 1,
+          source: "user",
+          timestamp: "2026-11-01T09:00:00Z",
+          message: [{ type: "text", text: "what does this say?" }, audio],
+        },
+        {
+          step_id: 2,
+          source: "agent",
+          timestamp: "2026-11-01T09:00:01Z",
+          message: "Let me listen.",
+          tool_calls: [{ tool_call_id: "t1", function_name: "Listen", arguments: {} }],
+          observation: {
+            results: [
+              {
+                source_call_id: "t1",
+                content: [audio, { type: "text", text: "hello" }],
+                extra: { is_error: false },
+              },
+            ],
+          },
+        },
+      ],
+    });
+    const { records } = normalize(transcript);
+    expect(records[0]).toEqual({ role: "meta", source: "claude-code" });
+    expect(records.find((r) => r.role === "user")).toMatchObject({
+      content: "what does this say?\n[audio]",
+    });
+    expect(records.find((r) => r.role === "tool")).toMatchObject({
+      tool_call_id: "t1",
+      content: "[audio]\nhello",
+      ok: true,
+    });
+  });
+
+  it("refuse versions past ATIF-v1.8, naming the version", () => {
+    for (const version of ["ATIF-v1.9", "ATIF-v2.0"]) {
       const transcript = document((doc) => {
         doc.schema_version = version;
       });
       expect(() => normalize(transcript)).toThrow(
         expect.objectContaining({
           code: "invalid_input",
-          message: `${version} is not supported: this normalizer reads ATIF-v1.0 through ATIF-v1.7`,
+          message: `${version} is not supported: this normalizer reads ATIF-v1.0 through ATIF-v1.8`,
         }),
       );
     }
