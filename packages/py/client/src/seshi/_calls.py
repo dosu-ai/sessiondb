@@ -19,8 +19,10 @@ from . import models as m
 from ._routes import ROUTES, Route
 from ._version import __version__
 from .errors import (
+    ConfigRejected,
     Forbidden,
     OffsetMismatch,
+    PreconditionFailed,
     ServerError,
     SessionConflict,
     SessionRejected,
@@ -56,6 +58,8 @@ class Call(Generic[T]):
     query: Mapping[str, QueryValue] = field(default_factory=dict)
     body: Any = None
     headers: Mapping[str, str] = field(default_factory=dict)
+    content: bytes | None = None
+    """A body sent as it is (`application/octet-stream`), instead of `body` as JSON."""
 
     @property
     def route(self) -> Route:
@@ -114,8 +118,10 @@ def prepare(call: Call[Any], settings: Settings) -> httpx.Request:
         headers["authorization"] = f"Bearer {settings.token}"
         if settings.user is not None:
             headers["x-seshi-user"] = settings.user
-    content: bytes | None = None
-    if call.body is not None:
+    content: bytes | None = call.content
+    if call.content is not None:
+        headers["content-type"] = "application/octet-stream"
+    elif call.body is not None:
         headers["content-type"] = "application/json"
         content = json.dumps(call.body, separators=(",", ":"), ensure_ascii=False).encode()
         if len(content) >= settings.gzip_from:
@@ -509,10 +515,10 @@ def _unknown_source_is_none(model: type[M]) -> Callable[[Answer], M | None]:
     return read_answer
 
 
-def source(id: str, days: int | None) -> Call[m.SourceStatus | None]:
+def source(id: str, days: int | None) -> Call[m.SourceDetail | None]:
     return Call(
         "adminSource",
-        _unknown_source_is_none(m.SourceStatus),
+        _unknown_source_is_none(m.SourceDetail),
         path_params={"id": id},
         query={"days": days},
     )
@@ -531,3 +537,108 @@ def records(
         path_params={"id": id, "kind": kind},
         query={"since": since, "after": after, "limit": limit},
     )
+
+
+# --- The runtime config (server.runtime_config = store) -------------------------------------
+
+
+def _condition(if_match: str | None, create: bool) -> dict[str, str]:
+    """The headers of a conditional write: `If-Match` the ETag read, or `If-None-Match: *` to
+    create only."""
+    if if_match is not None and create:
+        raise ValueError("pass if_match or create, not both")
+    if if_match is not None:
+        return {"If-Match": if_match if if_match.startswith('"') else f'"{if_match}"'}
+    return {"If-None-Match": "*"} if create else {}
+
+
+def _runtime_write(model: type[M], *statuses: int) -> Callable[[Answer], M]:
+    def read_answer(answer: Answer) -> M:
+        if answer.status in (statuses or (200,)):
+            return model.model_validate(answer.body)
+        error = _error(answer.body)
+        code = str(error.get("code") or "unknown")
+        message = str(error.get("message") or f"HTTP {answer.status}")
+        if answer.status == 412:
+            raise PreconditionFailed(message)
+        if answer.status == 422:
+            problems = error.get("problems")
+            raise ConfigRejected(
+                code, message, [str(p) for p in problems] if isinstance(problems, list) else []
+            )
+        raise refuse(answer)
+
+    return read_answer
+
+
+def runtime_config(wait: str | None) -> Call[m.RuntimeConfigStatus]:
+    return Call("adminConfig", _model(m.RuntimeConfigStatus), query={"wait": wait})
+
+
+def patch_runtime_config(
+    set: Mapping[str, Any] | None, unset: list[str] | None, if_match: str | None, create: bool
+) -> Call[m.RuntimeWrite]:
+    return Call(
+        "patchAdminConfig",
+        _runtime_write(m.RuntimeWrite),
+        body=_dump(
+            m.RuntimeConfigPatch(set=dict(set) if set else None, unset=unset), m.RuntimeConfigPatch
+        ),
+        headers=_condition(if_match, create),
+    )
+
+
+def put_config_file(
+    name: str, content: bytes, if_match: str | None, create: bool
+) -> Call[m.RuntimeFileWrite]:
+    return Call(
+        "putAdminConfigFile",
+        _runtime_write(m.RuntimeFileWrite),
+        path_params={"name": name},
+        content=content,
+        headers=_condition(if_match, create),
+    )
+
+
+def delete_config_file(name: str, if_match: str | None) -> Call[m.RuntimeFileWrite | None]:
+    def read_answer(answer: Answer) -> m.RuntimeFileWrite | None:
+        if answer.status == 404 and error_code(answer.body) == "no_such_file":
+            return None
+        return _runtime_write(m.RuntimeFileWrite)(answer)
+
+    return Call(
+        "deleteAdminConfigFile",
+        read_answer,
+        path_params={"name": name},
+        headers=_condition(if_match, False),
+    )
+
+
+def put_source(
+    id: str, source: Mapping[str, Any], if_match: str | None, create: bool
+) -> Call[m.StoredSourceWrite]:
+    return Call(
+        "putAdminSource",
+        _runtime_write(m.StoredSourceWrite, 200, 201),
+        path_params={"id": id},
+        body=dict(source),
+        headers=_condition(if_match, create),
+    )
+
+
+def delete_source(id: str, if_match: str | None) -> Call[m.SourceDeleted | None]:
+    def read_answer(answer: Answer) -> m.SourceDeleted | None:
+        if answer.status == 404 and error_code(answer.body) == "unknown_source":
+            return None
+        return _runtime_write(m.SourceDeleted)(answer)
+
+    return Call(
+        "deleteAdminSource",
+        read_answer,
+        path_params={"id": id},
+        headers=_condition(if_match, False),
+    )
+
+
+def reseal_secrets() -> Call[m.ResealResult]:
+    return Call("resealSecrets", _runtime_write(m.ResealResult))

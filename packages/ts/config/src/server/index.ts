@@ -9,6 +9,7 @@ import { recordsSection } from "./records";
 import { redactionSection } from "./redaction";
 import { reviewSection } from "./review";
 import { searchSection } from "./search";
+import { secretsSection } from "./secrets";
 import { serverSection } from "./server";
 import { sourcesSection, UPLOAD_SOURCE_ID } from "./sources";
 import { storeSection } from "./store";
@@ -30,7 +31,21 @@ const sections = z.strictObject({
   search: searchSection,
   worker: workerSection,
   capture: captureSection,
+  secrets: secretsSection,
 });
+
+/** The sections that may also live in the bucket's `config/seshi.toml` when
+ * `server.runtime_config` is `store` (the data policy, which an admin changes now and then).
+ * The rest describe the process, its bucket and who may call it, and stay in files, env and
+ * flags. Sources live in the bucket too, one object each (`runtime/sources/`). */
+export const RUNTIME_SECTIONS = [
+  "default_visibility",
+  "filter",
+  "redaction",
+  "review",
+  "records",
+  "capture",
+] as const satisfies readonly (keyof z.output<typeof sections>)[];
 
 function bucketOf(url: string, extra = ""): { at: string; prefix: string } | undefined {
   const folder = /^(?:file:\/\/)?(\/.*)$/.exec(url);
@@ -92,6 +107,16 @@ function crossCheck(
       "required when auth.session_keys holds more than one key: which one signs",
     );
   }
+  const sealing = Object.keys(config.secrets.keys);
+  if (config.secrets.key_id !== undefined && !sealing.includes(config.secrets.key_id)) {
+    issue(["secrets", "key_id"], `names no key in secrets.keys (${sealing.join(", ") || "none"})`);
+  }
+  if (config.secrets.key_id === undefined && sealing.length > 1) {
+    issue(
+      ["secrets", "key_id"],
+      "required when secrets.keys holds more than one key: which one seals",
+    );
+  }
   const policies = new Set<string>();
   config.review.policies.forEach((policy, i) => {
     if (policies.has(policy.id)) {
@@ -144,7 +169,7 @@ export function signingKeyId(config: ServerConfig): string | undefined {
 
 export { type AuthSection, authSection, type OidcSection, oidcSection } from "./auth";
 export { type CaptureSection, captureSection } from "./capture";
-export { STORE_URL, VISIBILITIES, type Visibility } from "./common";
+export { STORE_URL, sourceId, VISIBILITIES, type Visibility } from "./common";
 export { type FilterOverride, type FilterSection, filterSection } from "./filter";
 export { type LimitsSection, limitsSection } from "./limits";
 export { type RecordsSection, recordsSection } from "./records";
@@ -170,6 +195,12 @@ export {
   reviewSection,
 } from "./review";
 export { type SearchSection, searchSection } from "./search";
+export {
+  MIN_SEALING_KEY_LENGTH,
+  type SecretsSection,
+  sealingKeyId,
+  secretsSection,
+} from "./secrets";
 export { parseListen, ROLES, type ServerSection, serverSection } from "./server";
 export {
   S3_PATH_PLACEHOLDERS,

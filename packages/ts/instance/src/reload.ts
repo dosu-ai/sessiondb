@@ -12,6 +12,7 @@ export const RESTART_ONLY_SECTIONS = [
   "limits",
   "search",
   "worker",
+  "secrets",
 ] as const satisfies readonly (keyof ServerConfig)[];
 
 /** The sections a reload applies: sources, redaction rule packs (their files are read again),
@@ -26,7 +27,7 @@ export const LIVE_SECTIONS = [
   "capture",
 ] as const satisfies readonly (keyof ServerConfig)[];
 
-export type ReloadTrigger = "signal" | "api" | "watch" | "manual";
+export type ReloadTrigger = "signal" | "api" | "watch" | "manual" | "store";
 
 export interface SourceChanges {
   added: string[];
@@ -75,6 +76,15 @@ export interface ConfigStatus {
   last_reload: ReloadReport | null;
   live_sections: readonly string[];
   restart_only_sections: readonly string[];
+  /** With `server.runtime_config = store`: the bucket's runtime config version, the one this
+   * instance runs, and why they differ when they do. */
+  runtime?: {
+    version: string;
+    applied: string;
+    applied_at: string;
+    last_sync: string | null;
+    problem?: string;
+  };
 }
 
 /** A config as plain, ordered JSON: secrets become a hash of their value, so two configs

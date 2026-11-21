@@ -1,21 +1,19 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { type BaseLayer, ConfigError, DEFAULT_BASE_URLS, parseConfigToml } from "@seshi/config";
+import { dirname, join } from "node:path";
+import {
+  type BaseLayer,
+  baseLayerIn,
+  SHARED_CONFIG,
+  SHARED_PREFIX,
+  safeSharedName,
+} from "@seshi/config";
 import { VERSION } from "@seshi/model";
-import { accessDeniedIn, type Store } from "@seshi/store";
+import { accessDeniedIn, listNamed, type Store } from "@seshi/store";
 import { writePrivateFile } from "../account/secrets";
 import type { ServerlessPaths } from "./settings";
 
-/** The bucket's shared settings live under this prefix (F11.6). */
-export const SHARED_PREFIX = "config/";
-export const SHARED_CONFIG = "seshi.toml";
 /** How long a cached copy is used before the bucket is asked again. */
 export const SHARED_MAX_AGE_MS = 5 * 60 * 1000;
-
-/** The providers' own endpoints: the only ones a shared config may send a key to. */
-const PROVIDER_ENDPOINTS = new Set(Object.values(DEFAULT_BASE_URLS));
-
-const SAFE_NAME = /^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*$/;
 
 interface SharedIndex {
   url: string;
@@ -89,100 +87,9 @@ function same(a: Record<string, string>, b: Record<string, string>): boolean {
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
-/** A secret read from a file is the laptop's own: a shared config may not name one. */
-function fileSecrets(value: unknown, path: string[], found: string[]): void {
-  if (Array.isArray(value)) {
-    value.forEach((v, i) => {
-      fileSecrets(v, [...path, String(i)], found);
-    });
-  } else if (value && typeof value === "object") {
-    const keys = Object.keys(value);
-    if (keys.length === 1 && keys[0] === "file") found.push(path.join("."));
-    else for (const [k, v] of Object.entries(value)) fileSecrets(v, [...path, k], found);
-  }
-}
-
-/** `config/seshi.toml` from a copy of the folder, with the paths it names relative to
- * `config/` (redaction packs, review prompt files) made absolute into that copy. A path must
- * stay inside the copy, no secret may be read from a file (a shared config names nothing on
- * the laptop), and a policy with a key may name no endpoint but its provider's (a key from a
- * laptop's environment goes nowhere the shared config chose). */
-export function baseLayerIn(dir: string, origin: string): BaseLayer | undefined {
-  const file = join(dir, SHARED_CONFIG);
-  if (!existsSync(file)) return undefined;
-  const tree = parseConfigToml(origin, readFileSync(file, "utf8"));
-  const problems: string[] = [];
-  const local = (path: unknown, where: string) => {
-    if (typeof path !== "string") return path;
-    const inside = resolve(dir, path);
-    const rel = relative(resolve(dir), inside);
-    if (
-      isAbsolute(path) ||
-      path.startsWith("~") ||
-      rel.startsWith("..") ||
-      rel.split(sep)[0] === ".."
-    ) {
-      problems.push(`${where}: ${JSON.stringify(path)} is outside config/; name a file in it`);
-      return path;
-    }
-    return inside;
-  };
-  const named: string[] = [];
-  fileSecrets(tree, [], named);
-  for (const where of named) {
-    problems.push(
-      `${where}: a secret read from a file names a path on each laptop; use { env = "NAME" }`,
-    );
-  }
-  const redaction = tree.redaction as { packs?: unknown } | undefined;
-  if (redaction && Array.isArray(redaction.packs)) {
-    redaction.packs = redaction.packs.map((p, i) => local(p, `redaction.packs.${i}`));
-  }
-  const review = tree.review as { policies?: unknown } | undefined;
-  if (review && Array.isArray(review.policies)) {
-    (review.policies as Record<string, Record<string, unknown>>[]).forEach((policy, i) => {
-      const keyed = ["decision", "redactor"].some((step) => {
-        const s = policy?.[step];
-        return !!s && typeof s === "object" && "api_key" in s;
-      });
-      for (const step of ["decision", "redactor"]) {
-        const s = policy?.[step];
-        if (!s || typeof s !== "object") continue;
-        if ("prompt_file" in s) {
-          s.prompt_file = local(s.prompt_file, `review.policies.${i}.${step}.prompt_file`);
-        }
-        if (keyed && typeof s.base_url === "string" && !PROVIDER_ENDPOINTS.has(s.base_url)) {
-          problems.push(
-            `review.policies.${i}.${step}.base_url: a shared config may not send each laptop's key to an endpoint it names; leave base_url unset, or set this policy in each laptop's own config (serverless.config)`,
-          );
-        }
-      }
-    });
-  }
-  if (problems.length > 0) throw new ConfigError(problems.map((p) => `${origin}: ${p}`));
-  return { path: origin, tree };
-}
-
-/** A name under `config/` a laptop or `seshi admin config` will read or write: a relative
- * path of plain names, none of them `.` or `..`, so it stays inside the folder it lands in. */
-export function safeSharedName(name: string): boolean {
-  return SAFE_NAME.test(name) && !name.split("/").some((part) => part === ".." || part === ".");
-}
-
 /** Each object under `config/` with a safe name (`safeSharedName`), by its name there. */
-export async function listSharedKeys(store: Store): Promise<{ name: string; etag?: string }[]> {
-  const out: { name: string; etag?: string }[] = [];
-  let after: string | undefined;
-  for (;;) {
-    const page = await store.list(SHARED_PREFIX, { startAfter: after, details: true });
-    const objects = page.objects ?? page.keys.map((key) => ({ key, etag: undefined }));
-    for (const { key, etag } of objects) {
-      const name = key.slice(SHARED_PREFIX.length);
-      if (safeSharedName(name)) out.push({ name, ...(etag ? { etag } : {}) });
-    }
-    after = page.keys.at(-1);
-    if (!page.truncated || after === undefined) return out;
-  }
+export function listSharedKeys(store: Store): Promise<{ name: string; etag?: string }[]> {
+  return listNamed(store, SHARED_PREFIX, safeSharedName);
 }
 
 /** Each shared file and its version: the ETag the listing gives (S3 does), else one `stat`. */

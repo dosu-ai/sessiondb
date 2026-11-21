@@ -28,6 +28,7 @@ export {
   type ConfigFs,
   type DropIns,
   type FlagValue,
+  type ListAddition,
   type Loaded,
   type LoadOptions,
   loadConfig,
@@ -47,10 +48,30 @@ export {
   SYSTEM_CONFIG_PATH,
   serverDropInDir,
 } from "./paths";
+export {
+  RUNTIME_INSTANCES_PREFIX,
+  RUNTIME_LISTS,
+  RUNTIME_SOURCES_PREFIX,
+  type RuntimeLayer,
+  runtimeLoadOptions,
+} from "./runtime";
+export {
+  getField,
+  isSealed,
+  Keyring,
+  type SealedValue,
+  SealingError,
+  type SecretView,
+  sealContext,
+  secretFields,
+  setField,
+} from "./sealed";
 export { describeSecret, Secret, type SecretRef, type SecretSources, secret } from "./secret";
 export * from "./server/index";
 export type { JsonSchema } from "./shape";
+export { baseLayerIn, baseLayerOf, SHARED_CONFIG, SHARED_PREFIX, safeSharedName } from "./shared";
 export { type ConfigEntry, configEntries, displayTree } from "./show";
+export { stringifyToml, tomlKey, tomlString } from "./toml";
 export { bytes, duration, formatBytes, formatDuration, parseBytes, parseDuration } from "./units";
 
 import { toJSONSchema } from "zod";

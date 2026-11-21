@@ -419,7 +419,7 @@ describe("model review without a key (F11)", () => {
       env: { AWS_SECRET_ACCESS_KEY: "laptop-secret" },
     });
     await expect(held).rejects.toMatchObject({ code: "shared_settings" });
-    await expect(held).rejects.toThrow(/may not send each laptop's key to an endpoint it names/);
+    await expect(held).rejects.toThrow(/may not send each machine's key to an endpoint it names/);
   });
 
   it("lets a laptop's own config name an endpoint for its key", async () => {

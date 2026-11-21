@@ -542,7 +542,7 @@ class SeshiClient(_Base):
         `days`."""
         return self._run(calls.sources(days))
 
-    def source(self, id: str, *, days: int | None = None) -> m.SourceStatus | None:
+    def source(self, id: str, *, days: int | None = None) -> m.SourceDetail | None:
         """One source's status; None for an unknown source."""
         return self._run(calls.source(id, days))
 
@@ -558,6 +558,72 @@ class SeshiClient(_Base):
         """A source's `failed` or `dropped` records, oldest first (X6.4); None for an unknown
         source."""
         return self._run(calls.records(kind, id, since, after, limit))
+
+    # The runtime config (server.runtime_config = store; docs/config.md, "Runtime config in the
+    # bucket"). Each write is checked by the server as a reload would check it before anything
+    # is written (`ConfigRejected` otherwise, with each problem), made under the condition given
+    # (`PreconditionFailed` when it does not hold), and applied on the server that took it at
+    # once; the other instances apply it within `server.config_poll`.
+
+    def runtime_config(self, *, wait: str | None = None) -> m.RuntimeConfigStatus:
+        """`GET /v1/admin/config`: the bucket's runtime config, its version, the settings the
+        server's files lock, and which live instances run it. `wait` (`"30s"`) waits for them
+        all to."""
+        return self._run(calls.runtime_config(wait))
+
+    def patch_runtime_config(
+        self,
+        *,
+        set: Mapping[str, Any] | None = None,
+        unset: list[str] | None = None,
+        if_match: str | None = None,
+        create: bool = False,
+    ) -> m.RuntimeWrite:
+        """Change data-policy settings in the bucket's `config/seshi.toml`: `set` maps dotted
+        paths (`"capture.exclude"`) to values, `unset` removes paths. `if_match` is the ETag
+        `runtime_config().doc.etag` gave; `create=True` when there is none yet."""
+        return self._run(calls.patch_runtime_config(set, unset, if_match, create))
+
+    def put_config_file(
+        self,
+        name: str,
+        content: bytes | str,
+        *,
+        if_match: str | None = None,
+        create: bool = False,
+    ) -> m.RuntimeFileWrite:
+        """Write a file under `config/` (`packs/org.json`), checked when the doc names it."""
+        data = content.encode() if isinstance(content, str) else content
+        return self._run(calls.put_config_file(name, data, if_match, create))
+
+    def delete_config_file(
+        self, name: str, *, if_match: str | None = None
+    ) -> m.RuntimeFileWrite | None:
+        """Remove a file under `config/`; None when there is none. Refused (`ServerError` 409
+        `in_use`) while the doc names it."""
+        return self._run(calls.delete_config_file(name, if_match))
+
+    def put_source(
+        self,
+        id: str,
+        source: Mapping[str, Any],
+        *,
+        if_match: str | None = None,
+        create: bool = False,
+    ) -> m.StoredSourceWrite:
+        """Store source `id` in the bucket: its settings as in `[[sources]]`. Secret values are
+        sealed and never returned; a secret left out keeps its sealed value when the type
+        stays the same."""
+        return self._run(calls.put_source(id, source, if_match, create))
+
+    def delete_source(self, id: str, *, if_match: str | None = None) -> m.SourceDeleted | None:
+        """Remove a stored source; None when the bucket has none by that id. Its sessions,
+        checkpoint and records stay."""
+        return self._run(calls.delete_source(id, if_match))
+
+    def reseal_secrets(self) -> m.ResealResult:
+        """Seal every stored source's secrets again with `secrets.key_id`'s key."""
+        return self._run(calls.reseal_secrets())
 
 
 class AsyncSeshiClient(_Base):
@@ -960,7 +1026,7 @@ class AsyncSeshiClient(_Base):
         """`GET /v1/admin/sources`."""
         return await self._run(calls.sources(days))
 
-    async def source(self, id: str, *, days: int | None = None) -> m.SourceStatus | None:
+    async def source(self, id: str, *, days: int | None = None) -> m.SourceDetail | None:
         """One source's status; None for an unknown source."""
         return await self._run(calls.source(id, days))
 
@@ -975,6 +1041,60 @@ class AsyncSeshiClient(_Base):
     ) -> m.RecordsPage | None:
         """A source's failure or drop records; None for an unknown source."""
         return await self._run(calls.records(kind, id, since, after, limit))
+
+    async def runtime_config(self, *, wait: str | None = None) -> m.RuntimeConfigStatus:
+        """`GET /v1/admin/config`."""
+        return await self._run(calls.runtime_config(wait))
+
+    async def patch_runtime_config(
+        self,
+        *,
+        set: Mapping[str, Any] | None = None,
+        unset: list[str] | None = None,
+        if_match: str | None = None,
+        create: bool = False,
+    ) -> m.RuntimeWrite:
+        """`PATCH /v1/admin/config`."""
+        return await self._run(calls.patch_runtime_config(set, unset, if_match, create))
+
+    async def put_config_file(
+        self,
+        name: str,
+        content: bytes | str,
+        *,
+        if_match: str | None = None,
+        create: bool = False,
+    ) -> m.RuntimeFileWrite:
+        """`PUT /v1/admin/config/files/{name}`."""
+        data = content.encode() if isinstance(content, str) else content
+        return await self._run(calls.put_config_file(name, data, if_match, create))
+
+    async def delete_config_file(
+        self, name: str, *, if_match: str | None = None
+    ) -> m.RuntimeFileWrite | None:
+        """`DELETE /v1/admin/config/files/{name}`; None when there is none."""
+        return await self._run(calls.delete_config_file(name, if_match))
+
+    async def put_source(
+        self,
+        id: str,
+        source: Mapping[str, Any],
+        *,
+        if_match: str | None = None,
+        create: bool = False,
+    ) -> m.StoredSourceWrite:
+        """`PUT /v1/admin/sources/{id}`."""
+        return await self._run(calls.put_source(id, source, if_match, create))
+
+    async def delete_source(
+        self, id: str, *, if_match: str | None = None
+    ) -> m.SourceDeleted | None:
+        """`DELETE /v1/admin/sources/{id}`; None when there is none."""
+        return await self._run(calls.delete_source(id, if_match))
+
+    async def reseal_secrets(self) -> m.ResealResult:
+        """`POST /v1/admin/secrets/reseal`."""
+        return await self._run(calls.reseal_secrets())
 
 
 def auth_config(

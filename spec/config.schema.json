@@ -43,6 +43,31 @@
           "default": false,
           "description": "Reload when the config file, a drop-in in seshi.d/, a redaction pack or a review prompt file changes, a second after the last change. Off by default: SIGHUP and POST /v1/admin/reload apply changes when you say so and report the result.",
           "type": "boolean"
+        },
+        "runtime_config": {
+          "default": "file",
+          "description": "Where the settings that change at runtime live (docs/config.md, \"Runtime config\"). file: this file and its drop-ins hold everything, and a reload reaches this process only. store: the bucket also holds them (config/seshi.toml and config/packs/ for the data policy, runtime/sources/ for sources), every instance applies them within config_poll, and the admin API writes them.",
+          "type": "string",
+          "enum": [
+            "file",
+            "store"
+          ]
+        },
+        "config_poll": {
+          "description": "With runtime_config = store: how often each instance looks for a change in the bucket.",
+          "default": "10s",
+          "x-seshi-format": "duration",
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(\\d+)(ms|s|m|h|d|w)$"
+            },
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -2089,6 +2114,65 @@
           "items": {
             "type": "string"
           }
+        }
+      },
+      "additionalProperties": false
+    },
+    "secrets": {
+      "description": "Sealing keys for secrets stored in the bucket.",
+      "default": {},
+      "type": "object",
+      "properties": {
+        "keys": {
+          "description": "Keys that seal the secrets of sources the admin API stores in the bucket (runtime_config = store), by key id. 32+ characters each. Old keys stay to unseal until `seshi admin secrets reseal` has run.",
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,32}$"
+          },
+          "additionalProperties": {
+            "x-seshi-secret": true,
+            "description": "a secret: a literal, { env = \"NAME\" } or { file = \"/path\" }",
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "env": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "the environment variable to read"
+                  }
+                },
+                "required": [
+                  "env"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "the file to read"
+                  }
+                },
+                "required": [
+                  "file"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "key_id": {
+          "description": "The key in secrets.keys that seals new secrets; the only one when there is one.",
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false

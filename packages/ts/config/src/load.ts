@@ -72,9 +72,23 @@ export interface DropIns {
   lists: readonly (readonly string[])[];
 }
 
+/** Items appended to a list after the file and its drop-ins, as a drop-in adds them: the
+ * bucket's runtime config (its lists, and the sources stored one object each). */
+export interface ListAddition {
+  /** Where they came from, for origins and messages. */
+  origin: string;
+  list: readonly string[];
+  items: unknown[];
+  /** Leave out an item whose `id` is already in the list (a file's source wins), with a
+   * warning. */
+  skipKnownIds?: boolean;
+}
+
 export interface LoadOptions {
   /** Lowest layer above the built-in defaults. */
   base?: BaseLayer;
+  /** Added to lists after the drop-ins, before env and flags. */
+  additions?: readonly ListAddition[];
   file?: string;
   dropIns?: DropIns;
   /** Top-level tables the file's own settings are read without. */
@@ -370,6 +384,35 @@ function load<S extends z.ZodType>(schema: S, options: LoadOptions): Loaded<z.ou
     tree = mergeTables(tree, own);
   }
   const dropIns = options.dropIns ? readDropIns(fs, options.dropIns, shape, tree, origins) : [];
+  for (const addition of options.additions ?? []) {
+    const before = valueAt(tree, addition.list);
+    const existing = Array.isArray(before) ? before : [];
+    const known = new Set(
+      existing.flatMap((item) =>
+        isPlainObject(item) && typeof item.id === "string" ? [item.id] : [],
+      ),
+    );
+    const items = addition.items.filter((item) => {
+      const id = isPlainObject(item) && typeof item.id === "string" ? item.id : undefined;
+      if (addition.skipKnownIds && id !== undefined && known.has(id)) {
+        warnings.push(
+          `${addition.origin}: ${addition.list.join(".")} '${id}' is also in a config file, which wins; this one is not used`,
+        );
+        return false;
+      }
+      if (id !== undefined) known.add(id);
+      return true;
+    });
+    if (items.length === 0) continue;
+    const shifted = new Array(existing.length).concat(items);
+    recordFile(
+      shape,
+      nest(addition.list, shifted),
+      { source: "file", path: addition.origin },
+      origins,
+    );
+    setNested(tree, addition.list, [...existing, ...items]);
+  }
 
   const ignore = new Set([...(options.ignoreEnv ?? []), ...referencedEnv(shape, tree, env)]);
   const assignments: Assignment[] = [

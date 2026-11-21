@@ -82,6 +82,16 @@ export interface OwnersPage {
 }
 
 /** A source's state (`GET /v1/admin/sources`). */
+/** `GET /v1/admin/sources/{id}`: a source's status, and where it is set. */
+export interface SourceDetail extends SourceStatus {
+  managed: "file" | "store" | "builtin";
+  /** A stored source's settings, each sealed secret as a `SecretView`. */
+  config?: Record<string, unknown>;
+  etag?: string;
+  updated_at?: string;
+  running?: boolean;
+}
+
 export interface SourceStatus {
   id: string;
   type: string;
@@ -171,6 +181,63 @@ export interface ConfigStatus {
   last_reload: ReloadReport | null;
   live_sections: string[];
   restart_only_sections: string[];
+  /** With `server.runtime_config = store`: the bucket's version and the one running here. */
+  runtime?: RuntimeHere;
+}
+
+/** The bucket's runtime config version, the one this instance runs, and why they differ. */
+export interface RuntimeHere {
+  version: string;
+  applied: string;
+  applied_at: string;
+  last_sync: string | null;
+  problem?: string;
+}
+
+/** What one instance last said about the runtime config it runs. */
+export interface RuntimeInstance {
+  schema: "seshi/runtime-instance/1";
+  instance: string;
+  process: string;
+  seshi: string;
+  version: string;
+  applied_at: string;
+  at: string;
+  problem?: string;
+  /** It runs the bucket's current version. */
+  current: boolean;
+}
+
+/** `GET /v1/admin/config`: the runtime config in the bucket and which instances run it. On a
+ * file-only server `runtime_config` is `file` and only `effective` is given. */
+export interface RuntimeConfigStatus {
+  runtime_config: "file" | "store";
+  version?: string;
+  here?: RuntimeHere;
+  converged?: boolean;
+  instances?: RuntimeInstance[];
+  doc?: {
+    etag?: string;
+    settings: Record<string, unknown>;
+    files: { name: string; etag: string }[];
+  };
+  /** Settings the server's files set, which cannot be changed through the API. */
+  locked?: string[];
+  effective: Record<string, unknown>;
+}
+
+/** What may be said of a stored secret; never its value. */
+export interface SecretView {
+  set: true;
+  fingerprint: string;
+  key_id: string;
+  updated_at: string;
+}
+
+/** The condition a runtime config write is made under: the ETag read, or create only. */
+export interface WriteCondition {
+  ifMatch?: string;
+  create?: boolean;
 }
 
 /** One stored write's model review (`GET /v1/sessions/{format}/{id}/reviews`, F3.8). Callers

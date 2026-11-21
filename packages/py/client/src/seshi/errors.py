@@ -3,7 +3,9 @@
 The same vocabulary as `@dosu/seshi-client` (docs/client.md#errors): `409 offset_mismatch` is
 `OffsetMismatch`, `409 conflict` is `SessionConflict`, `403 forbidden` is `Forbidden`, `422` is
 `SessionRejected`, `502` (and a server that cannot be reached) is `StoreError`; every other
-answer is a `ServerError` with its status and code. All of them are `SeshiError`s.
+answer is a `ServerError` with its status and code. The runtime config calls (`put_source`,
+`patch_runtime_config`…) raise `PreconditionFailed` for `412` and `ConfigRejected` for `422`.
+All of them are `SeshiError`s.
 """
 
 from __future__ import annotations
@@ -72,3 +74,21 @@ class ServerError(SeshiError):
 
     def __repr__(self) -> str:
         return f"ServerError(status={self.status}, code={self.code!r}, message={self.message!r})"
+
+
+class PreconditionFailed(SeshiError):
+    """A conditional write whose condition did not hold: the object changed since its ETag was
+    read (`if_match`), or exists (`create=True`). Read it again and redo the change."""
+
+    code = "precondition_failed"
+
+
+class ConfigRejected(SeshiError):
+    """A runtime config change the server refused before writing anything: it would not load
+    or check (`invalid`), or a secret cannot be sealed (`sealing`). `problems` lists each
+    thing wrong."""
+
+    def __init__(self, code: str, message: str, problems: list[str]) -> None:
+        super().__init__(message)
+        self.code = code
+        self.problems = problems

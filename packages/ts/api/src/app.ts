@@ -15,8 +15,15 @@ import {
   tokenInfo,
   USER_HEADER,
 } from "@seshi/auth";
+import {
+  ConfigError,
+  parseDuration,
+  RUNTIME_SECTIONS,
+  SealingError,
+  sourceId,
+} from "@seshi/config";
 import { renderTrace } from "@seshi/formats";
-import type { Instance } from "@seshi/instance";
+import { type Instance, RuntimeChangeError, type WriteCondition } from "@seshi/instance";
 import {
   CAPTURE_RULES_SCHEMA,
   type CaptureRulesDocument,
@@ -69,6 +76,7 @@ import {
 } from "@seshi/search";
 import {
   isOwner,
+  isPreconditionFailed,
   keys,
   listOwners,
   listRecords,
@@ -108,6 +116,8 @@ class HttpError extends Error {
     readonly status: number,
     readonly code: string,
     message: string,
+    /** Each thing wrong, one a line, when there are several (a refused config change). */
+    readonly problems?: string[],
   ) {
     super(message);
   }
@@ -120,8 +130,8 @@ function json(body: unknown, status = 200, headers: Record<string, string> = {})
   });
 }
 
-function error(status: number, code: string, message: string): Response {
-  return json({ error: { code, message } }, status);
+function error(status: number, code: string, message: string, problems?: string[]): Response {
+  return json({ error: { code, message, ...(problems ? { problems } : {}) } }, status);
 }
 
 const RETRACT_HEADER = "x-seshi-retract";
@@ -1023,8 +1033,39 @@ export function createApp(instance: Instance) {
   route("GET", "/v1/admin/sources/:id", async ({ request, params, url }) => {
     await caller(request, "sources:admin");
     const id = decodeURIComponent(params.id as string);
-    if (!(await knownSource(id, false))) throw unknownSource(id);
-    return json(await instance.sources.status(id, { days: daysParam(url) }));
+    const stored = instance.runtime?.storedSource(id);
+    if (!stored && !(await knownSource(id, false))) throw unknownSource(id);
+    // A stored source this instance does not run (left out, or not applied yet) has no
+    // status here beyond what the bucket says.
+    const status =
+      stored && instance.source(id) === undefined
+        ? {
+            id,
+            type: String(stored.source.type ?? ""),
+            enabled: stored.source.enabled !== false,
+            polled: false,
+            note: "stored in the bucket; not running on this instance",
+            checkpoint: null,
+            dropped: 0,
+            failed: 0,
+            health: {},
+          }
+        : await instance.sources.status(id, { days: daysParam(url) });
+    if (!stored) {
+      return json({ ...status, managed: id === UPLOAD_SOURCE ? "builtin" : "file" });
+    }
+    return json(
+      {
+        ...status,
+        managed: "store",
+        config: stored.source,
+        updated_at: stored.updated_at,
+        etag: stored.etag,
+        running: instance.source(id) !== undefined,
+      },
+      200,
+      { etag: `"${stored.etag}"` },
+    );
   });
 
   route("GET", "/v1/admin/sources/:id/:kind", async ({ request, params, url }) => {
@@ -1054,7 +1095,236 @@ export function createApp(instance: Instance) {
     return json({ source: id, kind, ...page });
   });
 
-  return { fetch: dispatch(routes), auth, pipeline };
+  // The runtime config (server.runtime_config = store, docs/config.md): the data policy in
+  // the bucket's config/seshi.toml and the files it names, and sources stored one object each.
+  // Each change is checked as a reload would check it, written with the caller's condition,
+  // and applied here at once; the other instances apply it within server.config_poll.
+
+  function runtimeOf() {
+    if (!instance.runtime) {
+      throw new HttpError(
+        409,
+        "runtime_config_off",
+        "this server's config is file-only (server.runtime_config = file): change its config files and reload",
+      );
+    }
+    return instance.runtime;
+  }
+
+  function conditionOf(request: Request): WriteCondition {
+    const match = request.headers.get("if-match");
+    const none = request.headers.get("if-none-match");
+    if (match && none) {
+      throw new HttpError(400, "bad_header", "send If-Match or If-None-Match, not both");
+    }
+    if (none !== null && none.trim() !== "*") {
+      throw new HttpError(400, "bad_header", "If-None-Match takes * (create only)");
+    }
+    return {
+      ...(match ? { ifMatch: match.trim().replace(/^W\//, "").replace(/^"|"$/g, "") } : {}),
+      ...(none !== null ? { ifNoneMatch: "*" as const } : {}),
+    };
+  }
+
+  const CHANGE_STATUS: Record<RuntimeChangeError["code"], number> = {
+    invalid: 422,
+    locked: 409,
+    file_owned: 409,
+    unknown_source: 404,
+    no_such_file: 404,
+    in_use: 409,
+  };
+
+  async function change<T>(write: () => Promise<T>): Promise<T> {
+    let result: T;
+    try {
+      result = await write();
+    } catch (err) {
+      if (err instanceof RuntimeChangeError) {
+        throw new HttpError(CHANGE_STATUS[err.code], err.code, err.message, err.problems);
+      }
+      if (isPreconditionFailed(err)) {
+        throw new HttpError(
+          412,
+          "precondition_failed",
+          "it changed since it was read (or already exists): read it again and redo the change",
+        );
+      }
+      if (err instanceof SealingError) throw new HttpError(422, "sealing", err.message);
+      if (err instanceof ConfigError) {
+        throw new HttpError(
+          422,
+          "invalid",
+          `the config does not load as it stands: ${err.issues.join("; ")}`,
+          err.issues,
+        );
+      }
+      throw err;
+    }
+    // Written: applied here now if the bucket answers, else by the next poll. A failure to
+    // read it back does not make the write a failure.
+    await instance.refreshConfig().catch((err) => {
+      instance.log.warn(
+        `runtime config: written, but not read back yet: ${err instanceof Error ? err.message : err}`,
+      );
+    });
+    return result;
+  }
+
+  const check = (config: Parameters<Instance["check"]>[0]) => instance.check(config);
+
+  function quoted(etag: string): Record<string, string> {
+    return etag ? { etag: `"${etag}"` } : {};
+  }
+
+  function runtimeSettings(): Record<string, unknown> {
+    const config = instance.config as unknown as Record<string, unknown>;
+    return JSON.parse(
+      JSON.stringify(Object.fromEntries(RUNTIME_SECTIONS.map((key) => [key, config[key]]))),
+    ) as Record<string, unknown>;
+  }
+
+  route("GET", "/v1/admin/config", async ({ request, url }) => {
+    await caller(request, "sources:admin");
+    if (!instance.runtime) {
+      return json({ runtime_config: "file", effective: runtimeSettings() });
+    }
+    const runtime = instance.runtime;
+    await instance.refreshConfig();
+    const waitParam = url.searchParams.get("wait");
+    let waitMs = 0;
+    if (waitParam !== null) {
+      const parsed = parseDuration(waitParam);
+      if (parsed === undefined) {
+        throw new HttpError(400, "bad_query", "wait is a duration such as 10s");
+      }
+      waitMs = Math.min(parsed, 60_000);
+    }
+    const freshMs = 3 * runtime.pollMs + 5_000;
+    const deadline = now().getTime() + waitMs;
+    let instances = await runtime.instances(freshMs);
+    while (instances.some((i) => !i.current) && now().getTime() < deadline) {
+      await Bun.sleep(500);
+      instances = await runtime.instances(freshMs);
+    }
+    const doc = runtime.doc();
+    return json(
+      {
+        runtime_config: "store",
+        version: runtime.version,
+        here: instance.configStatus().runtime,
+        converged: instances.every((i) => i.current),
+        instances,
+        doc,
+        locked: runtime.locked(),
+        effective: runtimeSettings(),
+      },
+      200,
+      quoted(doc.etag ?? ""),
+    );
+  });
+
+  route("PATCH", "/v1/admin/config", async ({ request }) => {
+    await caller(request, "sources:admin");
+    const runtime = runtimeOf();
+    const condition = conditionOf(request);
+    const body = await readJson(request, 1024 * 1024);
+    const set = body.set;
+    const unset = body.unset;
+    if (set !== undefined && (typeof set !== "object" || set === null || Array.isArray(set))) {
+      throw new HttpError(400, "bad_field", "set maps dotted paths to values");
+    }
+    if (
+      unset !== undefined &&
+      (!Array.isArray(unset) || !unset.every((u) => typeof u === "string"))
+    ) {
+      throw new HttpError(400, "bad_field", "unset lists dotted paths");
+    }
+    const { etag } = await change(() =>
+      runtime.patchDoc(
+        {
+          ...(set ? { set: set as Record<string, unknown> } : {}),
+          ...(unset ? { unset: unset as string[] } : {}),
+        },
+        condition,
+        check,
+      ),
+    );
+    return json({ etag, version: runtime.version }, 200, quoted(etag));
+  });
+
+  route("PUT", "/v1/admin/config/files/*name", async ({ request, params }) => {
+    await caller(request, "sources:admin");
+    const runtime = runtimeOf();
+    const name = decodeURIComponent(params.name as string);
+    const condition = conditionOf(request);
+    const body = await readBody(request, 1024 * 1024);
+    const { etag } = await change(() => runtime.putFile(name, body, condition, check));
+    return json({ name, etag, version: runtime.version }, 200, quoted(etag));
+  });
+
+  route("DELETE", "/v1/admin/config/files/*name", async ({ request, params }) => {
+    await caller(request, "sources:admin");
+    const runtime = runtimeOf();
+    const name = decodeURIComponent(params.name as string);
+    const condition = conditionOf(request);
+    await change(() => runtime.deleteFile(name, condition, check));
+    return json({ name, deleted: true, version: runtime.version });
+  });
+
+  function storedSourceId(raw: string): string {
+    const id = decodeURIComponent(raw);
+    if (id === UPLOAD_SOURCE || !sourceId.safeParse(id).success) {
+      throw new HttpError(
+        400,
+        "bad_id",
+        "a source id is lower-case letters and digits, words joined by single -, up to 63 characters, and not 'upload'",
+      );
+    }
+    return id;
+  }
+
+  route("PUT", "/v1/admin/sources/:id", async ({ request, params }) => {
+    const principal = await caller(request, "sources:admin");
+    const runtime = runtimeOf();
+    const id = storedSourceId(params.id as string);
+    const condition = conditionOf(request);
+    const body = await readJson(request, 1024 * 1024);
+    const { etag, created } = await change(() =>
+      runtime.putSource(id, body, condition, check, principal.owner),
+    );
+    const stored = runtime.storedSource(id);
+    return json(
+      { id, etag, source: stored?.source, version: runtime.version },
+      created ? 201 : 200,
+      quoted(etag),
+    );
+  });
+
+  route("DELETE", "/v1/admin/sources/:id", async ({ request, params }) => {
+    await caller(request, "sources:admin");
+    const runtime = runtimeOf();
+    const id = storedSourceId(params.id as string);
+    const condition = conditionOf(request);
+    await change(() => runtime.deleteSource(id, condition));
+    return json({ id, deleted: true, version: runtime.version });
+  });
+
+  route("POST", "/v1/admin/secrets/reseal", async ({ request }) => {
+    await caller(request, "sources:admin");
+    const runtime = runtimeOf();
+    const result = await change(() => runtime.reseal());
+    return json({ key_id: runtime.keyring.current ?? null, ...result });
+  });
+
+  const handle = dispatch(routes);
+  async function fetch(request: Request): Promise<Response> {
+    // Health answers at once, whatever the bucket is doing.
+    if (new URL(request.url).pathname !== "/healthz") await instance.freshen();
+    return handle(request);
+  }
+
+  return { fetch, auth, pipeline };
 }
 
 function dispatch(routes: readonly Route[]): (request: Request) => Promise<Response> {
@@ -1073,7 +1343,7 @@ function dispatch(routes: readonly Route[]): (request: Request) => Promise<Respo
       try {
         return await r.handler({ request, url, params });
       } catch (err) {
-        if (err instanceof HttpError) return error(err.status, err.code, err.message);
+        if (err instanceof HttpError) return error(err.status, err.code, err.message, err.problems);
         if (err instanceof Unauthorized) return error(401, err.code, err.message);
         if (err instanceof Forbidden) return error(403, err.code, err.message);
         if (err instanceof StoreError) {

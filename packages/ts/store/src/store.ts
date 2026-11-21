@@ -183,3 +183,24 @@ export async function updateObject(
     }
   }
 }
+
+/** Each object under `prefix`, by its name there, with its ETag when the listing says (S3,
+ * GCS and Azure do; the folder store does not, so callers `stat` for it). */
+export async function listNamed(
+  store: Store,
+  prefix: string,
+  keep: (name: string) => boolean = () => true,
+): Promise<{ name: string; etag?: string }[]> {
+  const out: { name: string; etag?: string }[] = [];
+  let after: string | undefined;
+  for (;;) {
+    const page = await store.list(prefix, { startAfter: after, details: true });
+    const objects = page.objects ?? page.keys.map((key) => ({ key, etag: undefined }));
+    for (const { key, etag } of objects) {
+      const name = key.slice(prefix.length);
+      if (keep(name)) out.push({ name, ...(etag ? { etag } : {}) });
+    }
+    after = page.keys.at(-1);
+    if (!page.truncated || after === undefined) return out;
+  }
+}

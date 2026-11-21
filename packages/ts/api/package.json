@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@seshi/auth": "workspace:*",
+    "@seshi/config": "workspace:*",
     "@seshi/formats": "workspace:*",
     "@seshi/instance": "workspace:*",
     "@seshi/model": "workspace:*",

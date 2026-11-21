@@ -83,6 +83,7 @@ answer back.
 | `createToken`, `listTokens`, `revokeToken`, `revokeOwnerTokens` | `/v1/tokens` (admins) |
 | `jobs()`, `sources({days})`, `source(id)`, `records(kind, id, …)` | `/v1/admin/jobs` and `/v1/admin/sources` (admins) |
 | `reload()`, `configStatus()` | `POST` and `GET /v1/admin/reload`: apply the config files again, and the running config's generation (admins). A rejected reload is returned with its `errors`, not thrown |
+| `runtimeConfig({wait})`, `patchRuntimeConfig({set, unset}, {ifMatch, create})`, `putConfigFile(name, content, …)`, `deleteConfigFile(name, …)`, `putSource(id, source, …)`, `deleteSource(id, …)`, `resealSecrets()` | The runtime config in the bucket, on a server with `server.runtime_config = "store"` ([config.md](config.md#runtime-config-in-the-bucket-serverruntime_config--store)) (admins). Writes are checked before anything is written and made with `If-Match` (`ifMatch`, the ETag read) or `If-None-Match: *` (`create`); a source's secrets are sealed and never returned |
 
 `authConfig({server})` and `exchangeIdToken({server}, request)` are the two calls made before
 there is a token: which ways in the server takes, and an IdP ID token for a seshi session token
@@ -111,6 +112,8 @@ A refusal the server maps to a status comes back as the error the pipeline would
 | `SessionConflict` | A whole upload that does not extend the stored session; send it with `replace` if you are its original writer |
 | `Forbidden` | The credential may not do this |
 | `StoreError` | The server's bucket failed; retry |
+| `PreconditionFailed` | A runtime config write whose `ifMatch`/`create` did not hold; read again and redo it |
+| `ConfigRejected` (`code`, `problems`) | A runtime config change that would not load or check (`invalid`), or a secret that cannot be sealed (`sealing`); nothing was written |
 | `ServerError` (`status`, `code`) | Any other answer |
 
 ## `@dosu/seshi-model`
@@ -206,6 +209,7 @@ The same calls as `@dosu/seshi-client`, in snake_case:
 | `create_token`, `list_tokens(owner=, kind=, all=)`, `revoke_token`, `revoke_owner_tokens` | the same | `/v1/tokens` (admins) |
 | `jobs()`, `sources(days=)`, `source(id, days=)`, `records(kind, id, since=, after=, limit=)` | the same | `/v1/admin/jobs` and `/v1/admin/sources` (admins) |
 | `reload()`, `config_status()` | the same | `POST` and `GET /v1/admin/reload` (admins); a rejected reload is returned, not raised |
+| `runtime_config(wait=)`, `patch_runtime_config(set=, unset=, if_match=, create=)`, `put_config_file`, `delete_config_file`, `put_source(id, source, if_match=, create=)`, `delete_source`, `reseal_secrets()` | `runtimeConfig`, `patchRuntimeConfig`, … | The runtime config in the bucket (`server.runtime_config = "store"`, admins) |
 | `health()` | | `GET /healthz` |
 | `auth_config()`, `exchange_id_token(request)` | `authConfig`, `exchangeIdToken` | Sent without a credential: a client built without a token makes them, as do the module functions `seshi.auth_config(server)` and `seshi.exchange_id_token(server, request)` |
 
@@ -231,8 +235,9 @@ Use a client as a context manager (`with` / `async with`), or call `close()` / `
 
 The same errors as `@dosu/seshi-client`, in `seshi.errors` and at the top level, all
 `SeshiError`s: `SessionRejected` (`code`), `OffsetMismatch` (`offset`, `expected`),
-`SessionConflict`, `Forbidden`, `StoreError` (also a server that cannot be reached), and
-`ServerError` (`status`, `code`) for any other answer. A response that does not match its model
+`SessionConflict`, `Forbidden`, `StoreError` (also a server that cannot be reached),
+`PreconditionFailed` and `ConfigRejected` (`code`, `problems`) from the runtime config calls,
+and `ServerError` (`status`, `code`) for any other answer. A response that does not match its model
 is pydantic's `ValidationError`.
 
 ## Other languages

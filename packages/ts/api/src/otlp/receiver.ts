@@ -118,7 +118,15 @@ export function otlpTraces(instance: Instance, deps: ReceiverDeps) {
       throw err;
     }
     const sourceId = principal.kind === "service" ? serviceSourceId(principal.owner) : undefined;
-    const source = sourceId ? instance.source(sourceId) : undefined;
+    let source = sourceId ? instance.source(sourceId) : undefined;
+    const lastSync = instance.runtime?.lastSync?.getTime() ?? 0;
+    if (sourceId && !source && instance.runtime && instance.now().getTime() - lastSync > 1_000) {
+      // A source the admin API just stored may not have reached this instance yet; read the
+      // bucket again, at most once a second, so a token for a deleted source is not a sync
+      // per request.
+      await instance.refreshConfig().catch(() => undefined);
+      source = instance.source(sourceId);
+    }
     if (!sourceId || !source || source.type !== "otlp") {
       return failure(
         encoding,

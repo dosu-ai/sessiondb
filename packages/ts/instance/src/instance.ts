@@ -66,6 +66,7 @@ import {
   POLLER_PREFIX,
   pollerJob,
 } from "./builtin-jobs";
+import { Coalesced } from "./coalesced";
 import { JobRunner } from "./jobs";
 import { type Logger, quietLogger } from "./log";
 import {
@@ -80,6 +81,7 @@ import {
   reviewSetHash,
   same,
 } from "./reload";
+import type { RuntimeConfig } from "./runtime";
 import { type InstanceStatus, instanceStatus } from "./status";
 
 export type Role = (typeof ROLES)[number];
@@ -146,7 +148,13 @@ export interface InstanceParts {
   /** Reads the config again for `reload()`: the same file, drop-ins, env and flags the server
    * started with. Without it the instance reloads only a config handed to it. */
   loadConfig?: () => ServerConfig | Promise<ServerConfig>;
+  /** The bucket's runtime config (`server.runtime_config = store`): synced every
+   * `server.config_poll`, written by the admin API. */
+  runtime?: RuntimeConfig;
 }
+
+/** The job that reads the bucket's runtime config on every instance. */
+export const RUNTIME_JOB = "runtime-config";
 
 export function defaultInstanceId(host: string = hostname()): string {
   const id = host
@@ -200,6 +208,10 @@ export class Instance {
   private reviewPrint: string | undefined;
   private lastReload: ReloadReport | null = null;
   private reloading: Promise<unknown> = Promise.resolve();
+  /** The bucket's runtime config, when this server keeps one there. */
+  readonly runtime: RuntimeConfig | undefined;
+  private readonly refreshing = new Coalesced<void>();
+  private lastFreshen = 0;
 
   /** The running config: the start-up one, or the last reload's (its restart-only sections are
    * always the start-up ones). */
@@ -244,6 +256,7 @@ export class Instance {
     const { config } = parts;
     this.running = config;
     this.loadConfig = parts.loadConfig;
+    this.runtime = parts.runtime;
     this.fetchImpl = parts.fetch;
     this.store = parts.store;
     this.storage = parts.storage;
@@ -375,6 +388,98 @@ export class Instance {
     for (const factory of [...BUILTIN_JOBS, ...(parts.jobs ?? [])]) {
       for (const job of factory(host)) this.jobs.register(job);
     }
+    if (this.runtime) {
+      const runtime = this.runtime;
+      runtime.markApplied();
+      this.jobs.register({
+        name: RUNTIME_JOB,
+        kind: RUNTIME_JOB,
+        placement: "every",
+        intervalMs: runtime.pollMs,
+        run: async () => {
+          await this.refreshConfig();
+          await runtime.heartbeat(this.id, this.process);
+          return { outcome: "ok" };
+        },
+      });
+    }
+  }
+
+  /** Read the bucket's runtime config and apply it when it changed. One at a time; a caller
+   * that arrives while one runs waits for it. A version that does not load or check is not
+   * applied: the running config stays, and the problem is reported (`configStatus`, the
+   * instance's heartbeat). */
+  refreshConfig(): Promise<void> {
+    if (!this.runtime) return Promise.resolve();
+    return this.refreshing.run(() => this.refreshNow());
+  }
+
+  private async refreshNow(): Promise<void> {
+    const runtime = this.runtime as RuntimeConfig;
+    const changed = await runtime.sync();
+    // Nothing new, and what runs is the bucket's (or was refused, and is not tried again until
+    // the bucket changes). A reload from elsewhere (SIGHUP) may have read a new version without
+    // recording it: apply it here, which records it.
+    if (!changed && (runtime.applied.version === runtime.version || runtime.applied.problem)) {
+      return;
+    }
+    let next: ServerConfig;
+    try {
+      const loaded = runtime.compose();
+      for (const warning of loaded.warnings) this.log.warn(`runtime config: ${warning}`);
+      next = loaded.config;
+    } catch (err) {
+      const why = err instanceof ConfigError ? err.issues.join("; ") : message(err);
+      this.log.error(`runtime config ${runtime.version} not applied: ${why}`);
+      runtime.markApplied(why);
+      return;
+    }
+    const report = await this.reload("store", next);
+    if (report.outcome === "rejected") runtime.markApplied((report.errors ?? []).join("; "));
+    else runtime.markApplied();
+  }
+
+  /** Before a request: when the bucket was last read more than two polls ago (an instance
+   * whose CPU was held between requests), read it first, waiting at most `waitMs`. */
+  async freshen(waitMs = 2_000): Promise<void> {
+    const runtime = this.runtime;
+    if (!runtime) return;
+    const now = this.now().getTime();
+    const last = runtime.lastSync?.getTime() ?? 0;
+    if (now - last <= 2 * runtime.pollMs) return;
+    // A bucket that is failing or hanging is not waited on by every request: one wait per
+    // poll interval, and the rest go on with the config running.
+    if (now - this.lastFreshen < runtime.pollMs) return;
+    this.lastFreshen = now;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      this.refreshConfig().catch((err) =>
+        this.log.warn(`runtime config: cannot read the bucket: ${message(err)}`),
+      ),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, waitMs);
+      }),
+    ]);
+    clearTimeout(timer);
+  }
+
+  /** The problems a config would be refused for, without applying it: what a reload checks
+   * (cross-section rules, rule packs, review policies), with this instance's restart-only
+   * sections. The admin API checks each runtime change with it before writing. */
+  async check(next: ServerConfig): Promise<string[]> {
+    const { config } = effectiveConfig(this.running, next);
+    const problems = serverConfigProblems(config);
+    if (problems.length > 0) return problems;
+    try {
+      await readRedactionPacks(config.redaction.packs);
+      await buildReviewer(config, {
+        ...(this.fetchImpl ? { fetch: this.fetchImpl } : {}),
+        log: this.log,
+      });
+    } catch (err) {
+      return [message(err)];
+    }
+    return [];
   }
 
   /** The config's generation and hash, and how the last reload went. */
@@ -390,6 +495,17 @@ export class Instance {
       last_reload: this.lastReload ? structuredClone(this.lastReload) : null,
       live_sections: LIVE_SECTIONS,
       restart_only_sections: RESTART_ONLY_SECTIONS,
+      ...(this.runtime
+        ? {
+            runtime: {
+              version: this.runtime.version,
+              applied: this.runtime.applied.version,
+              applied_at: this.runtime.applied.at.toISOString(),
+              last_sync: this.runtime.lastSync?.toISOString() ?? null,
+              ...(this.runtime.applied.problem ? { problem: this.runtime.applied.problem } : {}),
+            },
+          }
+        : {}),
     };
   }
 
@@ -555,6 +671,10 @@ export class Instance {
     if (this.closed) return;
     this.closed = true;
     await this.jobs.stop(timeoutMs);
+    if (this.runtime) {
+      await this.runtime.forget(this.process);
+      this.runtime.close();
+    }
     this.search?.close();
     let timer: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([

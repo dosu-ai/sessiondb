@@ -1011,6 +1011,20 @@ class SourceStatus(Response):
     health: dict[str, int]
 
 
+class SourceDetail(SourceStatus):
+    """`GET /v1/admin/sources/{id}`: a source's status, and where it is set."""
+
+    managed: Literal["file", "store", "builtin"]
+    """The server's files, the bucket (`put_source`), or built in (`upload`)."""
+    config: dict[str, Any] | None = None
+    """A stored source's settings, each sealed secret as a `SecretView`."""
+    etag: str | None = None
+    """A stored source's ETag, for `put_source(if_match=…)`."""
+    updated_at: str | None = None
+    running: bool | None = None
+    """A stored source this instance runs."""
+
+
 class SourceList(Response):
     """`GET /v1/admin/sources`."""
 
@@ -1139,6 +1153,17 @@ class ReloadReport(Response):
     restart_required: list[str]
 
 
+class RuntimeHere(Response):
+    """With `server.runtime_config = store`: the bucket's runtime config version, the one this
+    instance runs, and why they differ when they do."""
+
+    version: str
+    applied: str
+    applied_at: str
+    last_sync: str | None
+    problem: str | None = None
+
+
 class ConfigStatus(Response):
     """`GET /v1/admin/reload`: the running config's generation and hash, and the last reload."""
 
@@ -1152,6 +1177,114 @@ class ConfigStatus(Response):
     last_reload: ReloadReport | None
     live_sections: list[str]
     restart_only_sections: list[str]
+    runtime: RuntimeHere | None = None
+    """With `server.runtime_config = store`: the bucket's version and the one running here."""
+
+
+class RuntimeInstance(Response):
+    """What one instance last said about the runtime config it runs."""
+
+    schema_: Literal["seshi/runtime-instance/1"] = Field(alias="schema")
+    instance: str
+    process: str
+    seshi: str
+    version: str
+    applied_at: str
+    at: str
+    problem: str | None = None
+    current: bool
+    """It runs the bucket's current version."""
+
+
+class RuntimeDocFile(Response):
+    name: str
+    etag: str
+
+
+class RuntimeDoc(Response):
+    etag: str | None = None
+    """`config/seshi.toml`'s ETag, for `patch_runtime_config(if_match=…)`; None when the bucket
+    has none (create it with `create=True`)."""
+    settings: dict[str, Any]
+    """`config/seshi.toml` as stored, its paths as written."""
+    files: list[RuntimeDocFile]
+
+
+class RuntimeConfigStatus(Response):
+    """`GET /v1/admin/config`: the runtime config in the bucket and which instances run it. On
+    a file-only server `runtime_config` is `file` and only `effective` is given."""
+
+    runtime_config: Literal["file", "store"]
+    version: str | None = None
+    here: RuntimeHere | None = None
+    converged: bool | None = None
+    instances: list[RuntimeInstance] | None = None
+    doc: RuntimeDoc | None = None
+    locked: list[str] | None = None
+    """Settings the server's files set, which cannot be changed through the API."""
+    effective: dict[str, Any]
+    """The data policy in effect on the instance that answered (secrets masked)."""
+
+
+class RuntimeConfigPatch(Request):
+    """`PATCH /v1/admin/config`'s body: dotted paths under the runtime sections."""
+
+    set: dict[str, Any] | None = None
+    unset: list[str] | None = None
+
+
+class RuntimeWrite(Response):
+    """`PATCH /v1/admin/config`: the new `config/seshi.toml` ETag and the bucket's version."""
+
+    etag: str
+    version: str
+
+
+class RuntimeFileWrite(Response):
+    """A file under `config/` written or removed."""
+
+    name: str
+    etag: str | None = None
+    deleted: bool | None = None
+    version: str
+
+
+class SecretView(Response):
+    """What may be said of a stored secret; never its value."""
+
+    set: Literal[True]
+    fingerprint: str
+    """An HMAC of the value under the sealing key: the same value shows the same fingerprint
+    until the next reseal."""
+    key_id: str
+    updated_at: str
+
+
+class StoredSourceWrite(Response):
+    """`PUT /v1/admin/sources/{id}`: the source as stored (sealed secrets as `SecretView`s)."""
+
+    id: str
+    etag: str
+    source: dict[str, Any]
+    version: str
+
+
+class SourceDeleted(Response):
+    """`DELETE /v1/admin/sources/{id}`."""
+
+    id: str
+    deleted: bool
+    version: str
+
+
+class ResealResult(Response):
+    """`POST /v1/admin/secrets/reseal`: which stored sources were sealed again with `key_id`,
+    which changed meanwhile and were skipped, and which already were."""
+
+    key_id: str | None
+    resealed: list[str]
+    changed: list[str]
+    current: list[str]
 
 
 class ReloadResult(Response):

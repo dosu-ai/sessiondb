@@ -10,6 +10,7 @@ import {
   shapeOf,
 } from "./load";
 import { cliConfigPath, findServerConfig, NOT_SETTINGS_ENV, serverDropInDir } from "./paths";
+import { type RuntimeLayer, runtimeLoadOptions } from "./runtime";
 import { type ServerConfig, serverConfigSchema } from "./server/index";
 
 export interface ServerLoadOptions extends Omit<LoadOptions, "file" | "foreign" | "ignoreEnv"> {
@@ -17,6 +18,8 @@ export interface ServerLoadOptions extends Omit<LoadOptions, "file" | "foreign" 
   cwd?: string;
   systemPath?: string;
   trustCwdConfig?: boolean;
+  /** The bucket's runtime config (`server.runtime_config = store`), under the file. */
+  runtime?: RuntimeLayer;
 }
 
 /** What a drop-in in `seshi.d/` may add to: sources, rule packs and the org's exclude and
@@ -40,8 +43,12 @@ export function loadServerConfig(options: ServerLoadOptions = {}): Loaded<Server
     systemPath: options.systemPath,
     trustCwdConfig: options.trustCwdConfig,
   });
-  return loadConfig(serverConfigSchema, {
-    ...options,
+  const { runtime, ...rest } = options;
+  const layered = runtime ? runtimeLoadOptions(runtime) : undefined;
+  const loaded = loadConfig(serverConfigSchema, {
+    ...rest,
+    ...(layered?.base ? { base: layered.base } : {}),
+    ...(layered ? { additions: layered.additions } : {}),
     fs,
     env,
     file: found.path,
@@ -51,6 +58,8 @@ export function loadServerConfig(options: ServerLoadOptions = {}): Loaded<Server
     ignoreEnv: [...NOT_SETTINGS_ENV],
     foreign: [shapeOf(cliConfigSchema)],
   });
+  if (layered) loaded.warnings.push(...layered.ignored);
+  return loaded;
 }
 
 export interface CliLoadOptions extends Omit<LoadOptions, "file" | "foreign" | "ignoreEnv"> {
@@ -83,7 +92,7 @@ export function loadCliConfig(options: CliLoadOptions = {}): Loaded<CliConfig> {
 /** The sections a serverless laptop ignores (F11.3): they configure what only a server runs
  * (OTLP intake is a source, so `[[sources]]` covers it).
  * A bucket that switches modes may keep them in its shared config. */
-export const SERVER_ONLY_SECTIONS = ["sources", "auth", "server", "worker"] as const;
+export const SERVER_ONLY_SECTIONS = ["sources", "auth", "server", "worker", "secrets"] as const;
 
 export interface ServerlessLoadOptions extends Omit<LoadOptions, "foreign" | "ignoreEnv"> {
   /** The local server config (`serverless.config`); none when unset. Unlike

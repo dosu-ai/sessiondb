@@ -15,11 +15,13 @@ import pytest
 from seshi import (
     AllChangesPage,
     AsyncSeshiClient,
+    ConfigRejected,
     Forbidden,
     LettaTrace,
     NotWritten,
     OffsetMismatch,
     OtlpTrace,
+    PreconditionFailed,
     ServerError,
     SeshiClient,
     SessionConflict,
@@ -425,6 +427,57 @@ def test_reload(live_server: LiveServer, admin: SeshiClient) -> None:
     last = admin.config_status().last_reload
     assert last is not None
     assert last.trigger == "api"
+
+
+def test_runtime_config(admin: SeshiClient, alice: SeshiClient) -> None:
+    status = admin.runtime_config()
+    assert status.runtime_config == "store"
+    assert status.doc is not None
+
+    # A member's Cursor key: sealed in the bucket, never shown again.
+    created = admin.put_source(
+        "cursor-py",
+        {"type": "cursor-cloud", "enabled": False, "api_key": "key_py_cursor_secret"},
+        create=True,
+    )
+    assert created.source["api_key"]["set"] is True
+    assert "key_py_cursor_secret" not in created.model_dump_json()
+    with pytest.raises(PreconditionFailed):
+        admin.put_source("cursor-py", {"type": "otlp"}, create=True)
+    detail = admin.source("cursor-py")
+    assert detail is not None
+    assert (detail.managed, detail.running, detail.etag) == ("store", True, created.etag)
+    kept = admin.put_source("cursor-py", {"type": "cursor-cloud"}, if_match=created.etag)
+    assert kept.source["api_key"]["fingerprint"] == created.source["api_key"]["fingerprint"]
+    with pytest.raises(ConfigRejected) as rejected:
+        admin.put_source("bad-py", {"type": "nope"})
+    assert rejected.value.problems
+
+    # The org's lists, and a pack the doc names.
+    doc_etag = status.doc.etag
+    written = admin.patch_runtime_config(
+        set={"capture.exclude": ["acme/py-secret"]},
+        **({"if_match": doc_etag} if doc_etag else {"create": True}),
+    )
+    assert "acme/py-secret" in alice.capture_rules().exclude
+    with pytest.raises(PreconditionFailed):
+        admin.patch_runtime_config(set={"filter.min_chars": 3}, if_match="stale")
+    assert admin.put_config_file("packs/py.json", '{"patterns": ["PYRT-[0-9]{4}"]}').name
+    admin.patch_runtime_config(set={"redaction.packs": ["packs/py.json"]}, if_match=written.etag)
+    with pytest.raises(ServerError) as in_use:
+        admin.delete_config_file("packs/py.json")
+    assert in_use.value.code == "in_use"
+    admin.patch_runtime_config(unset=["redaction.packs", "capture.exclude"])
+    assert admin.delete_config_file("packs/py.json") is not None
+    assert admin.delete_config_file("packs/py.json") is None
+
+    assert admin.reseal_secrets().current == ["cursor-py"]
+    assert admin.runtime_config(wait="5s").converged
+    deleted = admin.delete_source("cursor-py")
+    assert deleted is not None and deleted.deleted
+    assert admin.delete_source("cursor-py") is None
+    with pytest.raises(Forbidden):
+        alice.runtime_config()
 
 
 @pytest.mark.anyio

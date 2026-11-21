@@ -1,4 +1,5 @@
 import * as z from "zod";
+import { duration } from "../units";
 import { httpUrl } from "./common";
 
 export const ROLES = ["api", "worker"] as const;
@@ -45,6 +46,18 @@ export const serverSection = z
       .default(false)
       .describe(
         "Reload when the config file, a drop-in in seshi.d/, a redaction pack or a review prompt file changes, a second after the last change. Off by default: SIGHUP and POST /v1/admin/reload apply changes when you say so and report the result.",
+      ),
+    runtime_config: z
+      .enum(["file", "store"])
+      .default("file")
+      .describe(
+        'Where the settings that change at runtime live (docs/config.md, "Runtime config"). file: this file and its drop-ins hold everything, and a reload reaches this process only. store: the bucket also holds them (config/seshi.toml and config/packs/ for the data policy, runtime/sources/ for sources), every instance applies them within config_poll, and the admin API writes them.',
+      ),
+    config_poll: duration()
+      .refine((ms) => ms > 0, "must be above 0")
+      .prefault("10s")
+      .describe(
+        "With runtime_config = store: how often each instance looks for a change in the bucket.",
       ),
   })
   .prefault({})

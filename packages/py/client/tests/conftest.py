@@ -109,6 +109,11 @@ def live_server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[LiveServer
                 # Port 0: the server picks a free one and prints it (no port taken between a
                 # probe and the server binding it).
                 'listen = "127.0.0.1:0"',
+                # The bucket holds the runtime config too, so its calls can be made here.
+                'runtime_config = "store"',
+                'config_poll = "1s"',
+                "[secrets]",
+                f'keys = {{ k1 = "{"k" * 40}" }}',
                 "[store]",
                 f'url = "{(work / "store").as_uri()}"',
                 "[auth.tokens]",

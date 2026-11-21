@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { usernameOwner } from "@seshi/auth";
-import { cliConfigSchema } from "@seshi/config";
+import { cliConfigSchema, SHARED_CONFIG, SHARED_PREFIX } from "@seshi/config";
 import { VERSION } from "@seshi/model";
 import {
   accessDeniedIn,
@@ -20,7 +20,6 @@ import { emit, helpOrUsageError, takeJson } from "../cli/output";
 import { type BucketKey, bucketKeyFromEnv, saveBucketKey } from "../serverless/keys";
 import { openServerlessStore, refusalOf, runStorageTest, storageRefusal } from "../serverless/open";
 import { expandHome, homeFor } from "../serverless/settings";
-import { SHARED_CONFIG, SHARED_PREFIX } from "../serverless/shared";
 import type { CommandContext } from "./index";
 
 const USAGE = [

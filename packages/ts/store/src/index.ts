@@ -239,6 +239,7 @@ export {
   type ListedKey,
   type ListOptions,
   type ListResult,
+  listNamed,
   type ObjectStat,
   PreconditionFailed,
   type PutOptions,

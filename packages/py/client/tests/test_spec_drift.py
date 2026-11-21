@@ -69,7 +69,16 @@ MODELS: dict[str, type[BaseModel]] = {
     "SearchResult": m.SearchResult,
     "SearchMatch": m.SearchMatch,
     "SourceStatus": m.SourceStatus,
+    "SourceDetail": m.SourceDetail,
     "SourceRecord": m.SourceRecord,
+    "RuntimeHere": m.RuntimeHere,
+    "RuntimeInstance": m.RuntimeInstance,
+    "RuntimeConfigStatus": m.RuntimeConfigStatus,
+    "RuntimeWrite": m.RuntimeWrite,
+    "RuntimeFileWrite": m.RuntimeFileWrite,
+    "SecretView": m.SecretView,
+    "StoredSourceWrite": m.StoredSourceWrite,
+    "ResealResult": m.ResealResult,
     "RecordsPage": m.RecordsPage,
 }
 
@@ -109,7 +118,13 @@ REQUESTS: dict[str, type[BaseModel]] = {
     "setVisibility": m.VisibilityChange,
     "createToken": m.TokenRequest,
     "revokeOwnerTokens": m.OwnerRevocation,
+    "patchAdminConfig": m.RuntimeConfigPatch,
 }
+UNTYPED_REQUESTS: dict[str, str] = {
+    "putAdminSource": "a source's settings as in [[sources]], any type: a Mapping",
+    "putAdminConfigFile": "a file's bytes (application/octet-stream)",
+}
+"""Calls whose body has no model, and why."""
 Reads = type[BaseModel] | tuple[type[BaseModel], ...] | None
 RESPONSES: dict[str, dict[str, Reads]] = {
     "health": {"200": m.Health},
@@ -139,10 +154,17 @@ RESPONSES: dict[str, dict[str, Reads]] = {
     "revokeToken": {"200": m.RevokedToken},
     "adminJobs": {"200": m.JobsStatus},
     "adminSources": {"200": m.SourceList},
-    "adminSource": {"200": m.SourceStatus},
+    "adminSource": {"200": m.SourceDetail},
     "adminSourceRecords": {"200": m.RecordsPage},
     "adminReloadStatus": {"200": m.ConfigStatus},
     "adminReload": {"200": m.ReloadResult},
+    "adminConfig": {"200": m.RuntimeConfigStatus},
+    "patchAdminConfig": {"200": m.RuntimeWrite},
+    "putAdminConfigFile": {"200": m.RuntimeFileWrite},
+    "deleteAdminConfigFile": {"200": m.RuntimeFileWrite},
+    "putAdminSource": {"200": m.StoredSourceWrite, "201": m.StoredSourceWrite},
+    "deleteAdminSource": {"200": m.SourceDeleted},
+    "resealSecrets": {"200": m.ResealResult},
 }
 
 
@@ -362,6 +384,9 @@ def test_each_request_body_is_the_one_the_spec_takes(operation_id: str) -> None:
     operation = operations()[operation_id][2]
     body = operation.get("requestBody")
     if body is None:
+        assert operation_id not in REQUESTS
+        return
+    if operation_id in UNTYPED_REQUESTS:
         assert operation_id not in REQUESTS
         return
     schema = body["content"]["application/json"]["schema"]

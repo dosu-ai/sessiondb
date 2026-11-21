@@ -233,3 +233,39 @@ describe("every owner's change feed", () => {
     await expect(refused.db.allChanges()).rejects.toBeInstanceOf(Forbidden);
   });
 });
+
+describe("the runtime config calls", () => {
+  it("send their conditions and read their refusals", async () => {
+    const { db, seen } = routed({
+      "PUT /v1/admin/sources/cursor-a": [
+        201,
+        { id: "cursor-a", etag: "e1", source: {}, version: "v" },
+      ],
+      "PATCH /v1/admin/config": [
+        412,
+        { error: { code: "precondition_failed", message: "it changed" } },
+      ],
+      "PUT /v1/admin/config/files/packs%2Forg.json": [
+        422,
+        { error: { code: "invalid", message: "bad", problems: ["a", "b"] } },
+      ],
+      "DELETE /v1/admin/sources/gone": [404, { error: { code: "unknown_source", message: "no" } }],
+    });
+    await db.putSource("cursor-a", { type: "otlp" }, { create: true });
+    expect(seen[0]?.headers["if-none-match"]).toBe("*");
+    await expect(
+      db.patchRuntimeConfig({ set: { "filter.min_chars": 1 } }, { ifMatch: "e0" }),
+    ).rejects.toMatchObject({
+      name: "PreconditionFailed",
+    });
+    expect(seen[1]?.headers["if-match"]).toBe('"e0"');
+    await expect(db.putConfigFile("packs/org.json", "{}")).rejects.toMatchObject({
+      name: "ConfigRejected",
+      problems: ["a", "b"],
+    });
+    expect(seen[2]?.headers["content-type"]).toBe("application/octet-stream");
+    expect(await db.deleteSource("gone")).toBeNull();
+    // A server without the route is not "already gone".
+    await expect(db.deleteConfigFile("packs/x.json")).rejects.toMatchObject({ status: 404 });
+  });
+});

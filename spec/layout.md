@@ -18,6 +18,13 @@ any other writer must follow the rules below.
     failed/<stamp>-<key_hash>.json                        an envelope that failed (X4.8)
     health/<yyyy-mm-dd>/<instance>.json                   outcome counters, per instance (X4.8)
   worker/heartbeat.json                                   the worker's last run (X7.5)
+  config/
+    seshi.toml                                            shared settings (F11.6); a server's
+                                                          runtime config (runtime_config = store)
+    <file>                                                rule packs, review prompts it names
+  runtime/
+    sources/<source_id>.json                              a source the admin API stored
+    instances/<process>.json                              what one server process runs
   assembly/pending/<archive_id>                           a session with spans to assemble (X7.4)
   owners/<owner>/
     .probe                                                a writer's write check
@@ -80,6 +87,8 @@ worker by mistake) never silently lose each other's update:
 | trace objects | Content-addressed; created with `If-None-Match: *`, so the first object for a hash wins |
 | `sources/<id>/health/<day>/<instance>.json` | `If-Match`, by the one process that owns the shard |
 | change entries | Unique keys (stamp, archive id, random suffix); written plainly, before the pointer |
+| `config/*`, `runtime/sources/<id>.json` | With the caller's condition: `If-Match` the ETag read, `If-None-Match: *` to create (the admin API, `seshi admin config push`); `412` to the caller |
+| `runtime/instances/<process>.json` | Written plainly by the one process it names |
 
 S3 and R2 honour `If-Match` and `If-None-Match` on PUT. The folder store (`file://`) emulates
 them with a lock file per key, taken with an exclusive create; that is safe between processes
@@ -337,6 +346,23 @@ Read and written by the binary only, so their types are code-first in `@seshi/st
   unfinished listing resumes), `watch_from` and `hold` (with `ordered_keys`), `listed_at`,
   and `epoch` (which reading of the source this is: set when a manifest starts, moved on by
   every rewind; whole objects' idempotency keys carry it).
+- `config/seshi.toml` and the files beside it: serverless laptops' shared settings (F11.6),
+  and, on a server with `server.runtime_config = store`, its runtime config: the data-policy
+  sections (`default_visibility`, `filter`, `redaction`, `review`, `records`, `capture`) under
+  the server's own files (docs/config.md). Paths in it (`redaction.packs`, `prompt_file`) are
+  relative to `config/`. Review keys are `{ env = … }` references, never values.
+- `runtime/sources/<id>.json` (`seshi/runtime-source/1`): a source the admin API stored.
+  `source` is its settings as in `[[sources]]`, without `id` (the key is); each secret is
+  either `{ sealed = "v1.<key id>.<iv>.<box>" }` (AES-256-GCM under a key HKDF-derived from
+  `secrets.keys.<key id>`, with `source:<id>:<field>` as additional data) or an `{ env = … }`
+  reference, never a value. `secrets` gives each sealed field's `key_id`, `fingerprint` (an
+  HMAC of the value, 12 hex digits) and `updated_at`; then `updated_at` and `updated_by`. Kept
+  out of `config/`, which serverless laptops copy.
+- `runtime/instances/<process>.json` (`seshi/runtime-instance/1`): what one server process runs:
+  `instance`, `process`, `seshi` (its version), `version` (the runtime config version it runs:
+  a hash of the ETags of `config/*` and `runtime/sources/*`), `applied_at`, `at` (written every
+  `server.config_poll`) and `problem` (why it does not run the bucket's version). Removed when
+  the process stops, and by any reader when older than a day.
 - `worker/heartbeat.json` (`seshi/heartbeat/1`): the writing process (`instance`, unique per
   run) and its stable instance id (`host`), version, roles, start, when it was written (`at`)
   and its `interval_ms`, and `jobs`: each job's runs, failures, last start and finish, last

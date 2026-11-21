@@ -27,6 +27,7 @@ export {
   type InstanceParts,
   type PruneRun,
   type Role,
+  RUNTIME_JOB,
   readRedactionPacks,
   type SessionIdentity,
   storeOptions,
@@ -50,6 +51,16 @@ export {
   type ReloadTrigger,
   type SourceChanges,
 } from "./reload";
+export {
+  RUNTIME_INSTANCE_SCHEMA,
+  RuntimeChangeError,
+  RuntimeConfig,
+  type RuntimeConfigOptions,
+  type RuntimeInstanceRecord,
+  STORED_SOURCE_SCHEMA,
+  type StoredSource,
+  type WriteCondition,
+} from "./runtime";
 export { SEARCH_JOB, searchIndexJobs } from "./search-job";
 export {
   assessWorker,

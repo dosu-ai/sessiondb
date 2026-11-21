@@ -79,7 +79,10 @@ describe("precedence (F1.1)", () => {
       listen: ":7200",
       roles: ["api", "worker"],
       watch_config: false,
+      runtime_config: "file",
+      config_poll: 10_000,
     });
+    expect(config.secrets).toEqual({ keys: {} });
     expect(config.store).toEqual({ url: "file:///data" });
     expect(config.auth).toEqual({
       tokens: {},

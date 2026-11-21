@@ -82,6 +82,17 @@ ROUTES: dict[str, Route] = {
     ),
     "adminReloadStatus": Route("GET", "/v1/admin/reload"),
     "adminReload": Route("POST", "/v1/admin/reload"),
+    "adminConfig": Route("GET", "/v1/admin/config", query=("wait",)),
+    "patchAdminConfig": Route("PATCH", "/v1/admin/config", headers=("If-Match", "If-None-Match")),
+    "putAdminConfigFile": Route(
+        "PUT", "/v1/admin/config/files/{name}", headers=("If-Match", "If-None-Match")
+    ),
+    "deleteAdminConfigFile": Route(
+        "DELETE", "/v1/admin/config/files/{name}", headers=("If-Match",)
+    ),
+    "putAdminSource": Route("PUT", "/v1/admin/sources/{id}", headers=("If-Match", "If-None-Match")),
+    "deleteAdminSource": Route("DELETE", "/v1/admin/sources/{id}", headers=("If-Match",)),
+    "resealSecrets": Route("POST", "/v1/admin/secrets/reseal"),
 }
 
 UNCOVERED: dict[str, str] = {

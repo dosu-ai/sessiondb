@@ -3,11 +3,15 @@ import { dirname, join, relative, sep } from "node:path";
 import { parseArgs } from "node:util";
 import {
   type BaseLayer,
+  baseLayerIn,
   ConfigError,
   loadConfig,
   loadServerConfig,
   loadServerlessConfig,
   parseConfigToml,
+  SHARED_CONFIG,
+  SHARED_PREFIX,
+  safeSharedName,
   secretsIn,
   serverConfigSchema,
 } from "@seshi/config";
@@ -21,13 +25,7 @@ import { Refused } from "../cli/failures";
 import { emit, helpOrUsageError } from "../cli/output";
 import { openBucketStore, openServerlessStore, refusalOf } from "../serverless/open";
 import { isServerless } from "../serverless/settings";
-import {
-  baseLayerIn,
-  listSharedKeys,
-  SHARED_CONFIG,
-  SHARED_PREFIX,
-  safeSharedName,
-} from "../serverless/shared";
+import { listSharedKeys } from "../serverless/shared";
 import type { CommandContext } from "./index";
 import { configFlags } from "./serve-settings";
 import { SERVER_OPTIONS } from "./server-instance";

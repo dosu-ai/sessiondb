@@ -11,6 +11,14 @@ import { join } from "node:path";
 import { type App, createApp as appOver } from "@seshi/api";
 import { Auth, CREDENTIAL_SCOPES } from "@seshi/auth";
 import { FakeIdp } from "@seshi/auth/testing";
+import {
+  Keyring,
+  loadConfig,
+  type RuntimeLayer,
+  runtimeLoadOptions,
+  serverConfigSchema,
+} from "@seshi/config";
+import { RuntimeConfig } from "@seshi/instance";
 import { storeSession } from "@seshi/pipeline";
 import { compileRuleSet, validatePack } from "@seshi/redact";
 import {
@@ -283,6 +291,13 @@ describe("the document itself", () => {
         "GET /v1/admin/sources/{id}/{kind}",
         "GET /v1/admin/reload",
         "POST /v1/admin/reload",
+        "GET /v1/admin/config",
+        "PATCH /v1/admin/config",
+        "PUT /v1/admin/config/files/{name}",
+        "DELETE /v1/admin/config/files/{name}",
+        "POST /v1/admin/secrets/reseal",
+        "PUT /v1/admin/sources/{id}",
+        "DELETE /v1/admin/sources/{id}",
       ].sort(),
     );
   });
@@ -990,6 +1005,201 @@ describe("identity and access (X5)", () => {
     expect((await call("GET", "/v1/admin/sources/nope/failed", admin)).status).toBe(404);
     expect((await call("GET", "/v1/admin/sources/upload/failed", alice)).status).toBe(403);
     expect((await call("GET", "/v1/admin/sources/upload/failed", nobody)).status).toBe(401);
+  });
+
+  it("the runtime config routes (runtime_config = store)", async () => {
+    const { admin: first, org_key } = await auth.initAdmin({ owner: "ops" });
+    const SEAL = "s".repeat(32);
+    const storeUrl = store.url.startsWith("file://") ? store.url : `file://${store.url}`;
+    const text = `default_visibility = "owner"
+[store]
+url = ${JSON.stringify(storeUrl)}
+[server]
+runtime_config = "store"
+[secrets]
+keys = { k1 = "${SEAL}" }
+[[sources]]
+id = "adx-ingest"
+type = "otlp"
+`;
+    const load = (layer?: RuntimeLayer) => {
+      const layered = layer ? runtimeLoadOptions(layer) : undefined;
+      return loadConfig(serverConfigSchema, {
+        file: "seshi.toml",
+        fs: { readFile: () => text, mode: () => 0o100600 },
+        env: { SESHI_SEARCH__PATH: ":memory:" },
+        ...(layered?.base ? { base: layered.base } : {}),
+        ...(layered ? { additions: layered.additions } : {}),
+      });
+    };
+    let down = false;
+    const fail = () => Promise.reject(new StoreError("down"));
+    const switchable: Store = {
+      url: store.url,
+      get: (k) => (down ? fail() : store.get(k)),
+      put: (k, b, o) => (down ? fail() : store.put(k, b, o)),
+      stat: (k) => (down ? fail() : store.stat(k)),
+      delete: (k, o) => (down ? fail() : store.delete(k, o)),
+      list: (p, o) => (down ? fail() : store.list(p, o)),
+    };
+    const runtimeApp = (keyring: Keyring) =>
+      createApp({
+        store: switchable,
+        storage: { url: store.url },
+        auth,
+        config: text,
+        runtime: new RuntimeConfig({
+          store: switchable,
+          keyring,
+          load,
+          cacheDir: join(dir, `runtime-${Math.random().toString(36).slice(2)}`),
+          pollMs: 60_000,
+        }),
+      });
+    const rt = runtimeApp(new Keyring({ k1: SEAL }));
+    const admin = { app: rt, token: first?.token };
+    const alice = { app: rt, token: org_key?.token, user: "alice" };
+    const nobody = { app: rt, token: null };
+    const fileOnly = { app: x5, token: first?.token };
+
+    // Reading it.
+    const status = await call("GET", "/v1/admin/config", admin);
+    expect(status.body).toMatchObject({ runtime_config: "store", locked: ["default_visibility"] });
+    expect((await call("GET", "/v1/admin/config", fileOnly)).body).toMatchObject({
+      runtime_config: "file",
+    });
+    expect((await call("GET", "/v1/admin/config?wait=soon", admin)).status).toBe(400);
+    expect((await call("GET", "/v1/admin/config", alice)).status).toBe(403);
+    expect((await call("GET", "/v1/admin/config", nobody)).status).toBe(401);
+
+    // The data policy.
+    const patched = await call("PATCH", "/v1/admin/config", {
+      ...admin,
+      body: { set: { "capture.exclude": ["acme/hr"] } },
+      headers: { "if-none-match": "*" },
+    });
+    expect(patched.status).toBe(200);
+    const etag = patched.headers.get("etag") as string;
+    const p = (body: unknown, extra: object = {}) =>
+      call("PATCH", "/v1/admin/config", { ...admin, body, ...extra });
+    expect((await call("PATCH", "/v1/admin/config", { ...admin, raw: '{"set":5}' })).status).toBe(
+      400,
+    );
+    expect((await p({ set: { default_visibility: "org" } })).status).toBe(409);
+    expect(
+      (await p({ set: { "filter.min_chars": 1 } }, { headers: { "if-match": '"old"' } })).status,
+    ).toBe(412);
+    expect((await p({ set: { "search.enabled": false } })).status).toBe(422);
+    expect(
+      (await p({ set: { "filter.min_chars": 1 } }, { headers: { "if-match": etag } })).status,
+    ).toBe(200);
+    expect(
+      (await call("PATCH", "/v1/admin/config", { ...fileOnly, body: { set: {} } })).status,
+    ).toBe(409);
+    expect((await call("PATCH", "/v1/admin/config", { ...alice, body: { set: {} } })).status).toBe(
+      403,
+    );
+    expect((await call("PATCH", "/v1/admin/config", { ...nobody, body: { set: {} } })).status).toBe(
+      401,
+    );
+
+    // Files under config/.
+    const file = (method: string, name: string, extra: object = {}) =>
+      call(method, `/v1/admin/config/files/${encodeURIComponent(name)}`, {
+        ...admin,
+        ...(method === "PUT"
+          ? {
+              raw: JSON.stringify({ patterns: ["ACME-[0-9]{6}"] }),
+              contentType: "application/octet-stream",
+            }
+          : {}),
+        ...extra,
+      });
+    expect((await file("PUT", "packs/org.json")).status).toBe(200);
+    expect(
+      (await file("PUT", "packs/org.json", { headers: { "if-none-match": "*" } })).status,
+    ).toBe(412);
+    expect((await file("PUT", "seshi.toml")).status).toBe(422);
+    expect((await file("PUT", "packs/org.json", { app: x5 })).status).toBe(409);
+    expect(
+      (await file("PUT", "packs/org.json", { token: org_key?.token, user: "alice" })).status,
+    ).toBe(403);
+    expect((await file("PUT", "packs/org.json", { token: null })).status).toBe(401);
+    expect((await p({ set: { "redaction.packs": ["packs/org.json"] } })).status).toBe(200);
+    expect((await file("DELETE", "packs/org.json")).status).toBe(409);
+    expect((await file("DELETE", "packs/none.json")).status).toBe(404);
+    expect((await file("PUT", "prompts/p.md")).status).toBe(200);
+    expect(
+      (await file("DELETE", "prompts/p.md", { headers: { "if-match": '"old"' } })).status,
+    ).toBe(412);
+    expect((await file("DELETE", "prompts/p.md")).status).toBe(200);
+    expect(
+      (await file("DELETE", "prompts/p.md", { token: org_key?.token, user: "alice" })).status,
+    ).toBe(403);
+    expect((await file("DELETE", "prompts/p.md", { token: null })).status).toBe(401);
+
+    // Sources.
+    const src = (method: string, id: string, extra: object = {}) =>
+      call(method, `/v1/admin/sources/${id}`, { ...admin, ...extra });
+    const cursor = { type: "cursor-cloud", enabled: false, api_key: "key_cursor_secret" };
+    const created = await src("PUT", "cursor-a", { body: cursor });
+    expect(created.status).toBe(201);
+    expect(JSON.stringify(created.body)).not.toContain("key_cursor_secret");
+    expect(
+      (await src("PUT", "cursor-a", { body: { type: "cursor-cloud", enabled: true } })).status,
+    ).toBe(200);
+    expect(
+      (await src("PUT", "cursor-a", { body: cursor, headers: { "if-none-match": "*" } })).status,
+    ).toBe(412);
+    expect((await src("PUT", "Bad_Id", { body: cursor })).status).toBe(400);
+    expect((await src("PUT", "adx-ingest", { body: { type: "otlp" } })).status).toBe(409);
+    expect((await src("PUT", "other", { body: { type: "nope" } })).status).toBe(422);
+    expect(
+      (await src("PUT", "other", { body: { type: "otlp" }, token: org_key?.token, user: "alice" }))
+        .status,
+    ).toBe(403);
+    expect((await src("PUT", "other", { body: { type: "otlp" }, token: null })).status).toBe(401);
+    const one = await src("GET", "cursor-a");
+    expect(one.body).toMatchObject({
+      managed: "store",
+      running: true,
+      config: { api_key: { set: true } },
+    });
+
+    // Sealing keys.
+    expect((await call("POST", "/v1/admin/secrets/reseal", admin)).body).toMatchObject({
+      key_id: "k1",
+      current: ["cursor-a"],
+    });
+    const noCurrent = runtimeApp(new Keyring({ k1: SEAL, k2: "t".repeat(32) }));
+    expect(
+      (await call("POST", "/v1/admin/secrets/reseal", { ...admin, app: noCurrent })).status,
+    ).toBe(422);
+    expect((await call("POST", "/v1/admin/secrets/reseal", fileOnly)).status).toBe(409);
+    expect((await call("POST", "/v1/admin/secrets/reseal", alice)).status).toBe(403);
+    expect((await call("POST", "/v1/admin/secrets/reseal", nobody)).status).toBe(401);
+
+    expect((await src("DELETE", "nope")).status).toBe(404);
+    expect((await src("DELETE", "adx-ingest")).status).toBe(409);
+    expect((await src("DELETE", "cursor-a", { headers: { "if-match": '"old"' } })).status).toBe(
+      412,
+    );
+    expect((await src("DELETE", "Bad_Id")).status).toBe(400);
+    expect((await src("DELETE", "cursor-a", { token: org_key?.token, user: "alice" })).status).toBe(
+      403,
+    );
+    expect((await src("DELETE", "cursor-a", { token: null })).status).toBe(401);
+    expect((await src("DELETE", "cursor-a")).status).toBe(200);
+
+    // The bucket down.
+    down = true;
+    expect((await call("GET", "/v1/admin/config", admin)).status).toBe(502);
+    expect((await p({ set: { "filter.min_chars": 2 } })).status).toBe(502);
+    expect((await file("PUT", "packs/org.json")).status).toBe(502);
+    expect((await file("DELETE", "packs/org.json")).status).toBe(502);
+    expect((await src("PUT", "cursor-b", { body: cursor })).status).toBe(502);
+    expect((await src("DELETE", "cursor-b")).status).toBe(502);
+    expect((await call("POST", "/v1/admin/secrets/reseal", admin)).status).toBe(502);
   });
 
   it("the token routes", async () => {

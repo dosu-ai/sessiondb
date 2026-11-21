@@ -78,8 +78,8 @@ All three do the same thing, one reload at a time:
    going finishes with the rules it started with. `GET /v1/redaction/rules` serves the new
    packs (a new `ETag`) at once. Stored sessions keep the rules they were stored with until
    `seshi redact backfill`.
-5. **Some settings need a restart.** `[server]`, `[store]`, `[auth]`, `[limits]`, `[search]`
-   and `[worker]` are read once at start-up (the listener, the bucket, identity, request
+5. **Some settings need a restart.** `[server]`, `[store]`, `[auth]`, `[limits]`, `[search]`,
+   `[worker]` and `[secrets]` are read once at start-up (the listener, the bucket, identity, request
    caps, the index and the worker's own intervals). A reload that changes one of them applies
    everything else and lists the changed settings in `restart_required` (and logs a warning
    for each); they keep their running values until the server restarts. Live:
@@ -105,16 +105,77 @@ across all of them. Files whose names start with `.` and files not ending in `.t
 skipped, so write a drop-in under a temporary name and rename it into place. `seshi config
 show --origin` names the drop-in each value came from.
 
-### Why the files, and not an API that sets sources
+## Runtime config in the bucket (`server.runtime_config = "store"`)
 
-A mutable sources API (`PUT /v1/admin/sources/:id`) was considered and not built. The config
-holds connector credentials (or references to them) that the operator protects like the
-bucket keys (F1.3); one writable copy, in files, keeps a single source of truth that
-`config check`, `config show --origin`, version control and configuration management all
-read, and a restart cannot lose or resurrect a change made only in memory or in the bucket.
-A program that manages sources writes a drop-in and calls `POST /v1/admin/reload`: it gets the
-same validation and the same answer an API would give, and the operator can still see and
-override everything it wrote.
+By default (`runtime_config = "file"`) the files are the whole config: one `seshi.toml`, its
+drop-ins, env and flags, and a reload reaches the one process that gets it. That is the setup
+for one host, development and tests, and nothing below applies to it: the admin API's write
+routes answer `409 runtime_config_off`.
+
+With several instances on one bucket (Cloud Run, Kubernetes, Container Apps) there is no disk
+they share and no reload that reaches them all. Set `server.runtime_config = "store"`, and the
+settings that change at runtime live in the bucket as well, where every instance reads them:
+
+| Kind | Where | Changed by |
+|---|---|---|
+| The process: `[server]`, `[store]`, `[search]`, `[worker]`, `[limits]` | files, env, flags only | a deploy |
+| Identity and trust: `[auth]`, `[secrets]`, review keys (`{ env = … }`) | files, env, flags only | a deploy |
+| The data policy: `default_visibility`, `[filter]`, `[redaction]`, `[review]`, `[records]`, `[capture]` | files, or `config/seshi.toml` and the files it names (`config/packs/…`) | `PATCH /v1/admin/config`, `PUT /v1/admin/config/files/…`, `seshi admin config push` |
+| Sources | files, or `runtime/sources/<id>.json`, one object each | `PUT` and `DELETE /v1/admin/sources/<id>` |
+
+`config/` is the prefix serverless laptops read their shared settings from (F11.6), in the same
+format; sources and their sealed secrets are kept apart, under `runtime/`, which laptops never
+read.
+
+**The files win.** The bucket is the lowest layer: `config/seshi.toml`, then `seshi.toml`, its
+drop-ins, `SESHI_*` env and flags. A setting the files set is locked: the API refuses to change
+it (`409 locked`), and `GET /v1/admin/config` lists them. Lists (`redaction.packs`,
+`capture.exclude`, `capture.redact_tool_calls`) add the bucket's entries after the files', as
+drop-ins do, so an entry set at deploy time cannot be taken out at runtime. A source whose id is
+in a file belongs to the file: the API will not write or remove it, and a stored source with
+the same id is not used (with a warning). Any other section in `config/seshi.toml` is ignored
+on a server, with a warning. `seshi config show --origin` names the layer each value came from.
+
+**Every change is checked before it is written**, as a reload would check it: the candidate is
+merged under the files, and the schema, the cross-section rules, the rule packs (their test
+strings run) and the review policies must all pass (`422` with each problem in
+`error.problems`). Then it is written with the caller's condition: `If-Match` the `ETag` it read
+(`412` when it changed since), `If-None-Match: *` to create only. So a version seshi would
+refuse never lands in the bucket.
+
+**Every instance applies it.** The one that took the write applies it at once; the others read
+the bucket every `server.config_poll` (10 s): one listing of `config/` and of
+`runtime/sources/`, then only what changed. Before a request, an instance whose last read is
+older than two polls reads again first (at most 2 s), so one whose CPU was held between
+requests does not serve with old rules; an OTLP token for a source this instance does not know
+yet reads again before it is refused. A version that does not load is not applied: the last
+good one keeps running, and the instance reports why. Each instance writes what it runs to
+`runtime/instances/<process>.json`; `GET /v1/admin/config` shows the bucket's version and which
+live instances run it (`?wait=30s` waits for them, for tests and scripts). Writes do not wait:
+laptops fetch the rules on their own schedule, so no barrier could close that gap.
+
+**Secrets are sealed.** A source's secrets (`api_key`, `credentials.*`) sent as values are
+sealed with AES-256-GCM under a key from [`[secrets]`](#secrets), bound to the source and field
+they belong to, and are never returned: a read shows `{ set, fingerprint, key_id, updated_at }`
+in their place. A `PUT` that leaves a secret out keeps the sealed one when the source keeps its
+type. Only values are taken: `{ env = "NAME" }` and `{ file = … }` are refused (and a stored
+source holding one is left out), since they would let an admin token make the server send its
+own environment or files, the sealing keys among them, to an endpoint the caller picks. A
+source that needs one belongs in `seshi.toml`. To rotate: add a key to `secrets.keys`, point
+`secrets.key_id` at it, deploy, `POST /v1/admin/secrets/reseal`, then remove the old key. A
+stored source whose key is gone is left out (with a warning), so one lost key stops one
+source, not the server.
+
+The server does not start when it cannot read the bucket's runtime config: the files alone
+may be missing the org's rules.
+
+### Why files by default
+
+The files were the only way for a long time, on purpose: one writable copy that `config check`,
+`config show --origin`, version control and configuration management all read, which a restart
+cannot lose or resurrect. That still holds for one host, and is why the bucket is opt-in. It
+stops holding once several instances share a bucket and nothing else, which is when the
+bucket's runtime config is the one copy every instance sees.
 
 ## Environment names
 
@@ -177,6 +238,8 @@ milliseconds. Sizes are `<n><unit>` with `B`, `KB`, `MB`, `GB`, `KiB`, `MiB` or 
 | `public_url` | | The URL clients reach the server at, behind any proxy. Accepted but unused: sign-in goes from the CLI to the IdP directly (X5.7), so nothing reads it, and `config check` warns when it is set |
 | `roles` | `["api", "worker"]` | What this instance runs (X7.1). Flag `--roles`. `api` serves the HTTP API; `worker` runs the background jobs (pollers, retention, the heartbeat). Run exactly one worker (X7.2); an instance without `api` answers `/healthz` only |
 | `instance_id` | the host name | This instance's stable name: its source health shard and the heartbeat's `host` (letters, digits, `_`, `-`, up to 64) |
+| `runtime_config` | `"file"` | Where the settings that change at runtime live: `file` (the files are the whole config) or `store` (the bucket too: [Runtime config in the bucket](#runtime-config-in-the-bucket-serverruntime_config--store)) |
+| `config_poll` | `"10s"` | With `runtime_config = "store"`: how often each instance reads the bucket's runtime config |
 | `watch_config` | `false` | Reload when the config file, a drop-in in `seshi.d/`, a rule pack or a review `prompt_file` changes, a second after the last change ([Reloading](#reloading)). Off by default: an editor saving half a change would be applied or refused at once, and `SIGHUP` or `POST /v1/admin/reload` say when, and report the result |
 
 ### `[store]`
@@ -279,6 +342,16 @@ There is no shared HS256 secret any more (X5.2): seshi signs its own session tok
 other token is a seshi token stored hashed in the bucket (`tokens/<id>.json`). Without static
 tokens, run `seshi admin init` once where this config is: it prints the first admin token and
 the org key, each shown once. `seshi serve` warns when no token can call it yet.
+
+### `[secrets]`
+
+| Key | Default | |
+|---|---|---|
+| `keys` | `{}` | Keys that seal the secrets of sources stored in the bucket (`runtime_config = "store"`), by id (secrets, 32+ characters each; `openssl rand -hex 32`). Keep them in a secret manager and give them as `{ env = … }` or `{ file = … }`. An old key stays to unseal until `POST /v1/admin/secrets/reseal` has run |
+| `key_id` | the only key | The key in `keys` that seals new secrets; required with more than one |
+
+Without a key, a source with secrets cannot be stored (`422 sealing`); one with none (`otlp`)
+can.
 
 ### `default_visibility`
 

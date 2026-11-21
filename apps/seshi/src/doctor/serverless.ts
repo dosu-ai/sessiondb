@@ -1,8 +1,8 @@
+import { SHARED_PREFIX } from "@seshi/config";
 import { VERSION } from "@seshi/model";
 import { accessDeniedIn, keys, listOwners, probe, versionAtLeast } from "@seshi/store";
 import type { ServerlessBucket } from "../serverless/open";
 import { missingKeyMessage, refusalOf, runStorageTest } from "../serverless/open";
-import { SHARED_PREFIX } from "../serverless/shared";
 import type { CheckResult } from "./types";
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));

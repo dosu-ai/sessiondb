@@ -1383,16 +1383,23 @@ paths:
       tags: [admin]
       summary: One source's checkpoint, record counts and health.
       operationId: adminSource
-      description: Needs `sources:admin`. `upload` is the source of hooks and `seshi upload`.
+      description: |
+        Needs `sources:admin`. `upload` is the source of hooks and `seshi upload`. `managed`
+        says where the source is set; a source stored in the bucket also gives its settings
+        (each secret as a `SecretView`) and its `ETag`, in the header and the body.
       parameters:
         - $ref: "#/components/parameters/source_id"
         - $ref: "#/components/parameters/days"
       responses:
         "200":
           description: The source, read now.
+          headers:
+            ETag:
+              description: A stored source's ETag.
+              schema: { type: string }
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/SourceStatus" }
+              schema: { $ref: "#/components/schemas/SourceDetail" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
@@ -1401,6 +1408,85 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+        "502": { $ref: "#/components/responses/StorageError" }
+    put:
+      tags: [admin]
+      summary: Store a source in the bucket (runtime_config = store).
+      operationId: putAdminSource
+      description: |
+        The body is the source's settings as in `[[sources]]` (`id` may be left out). Secrets
+        sent as values are sealed under `secrets.key_id` and never returned; one left out
+        keeps its sealed value when the type stays the same; `{ env = … }` and `{ file = … }`
+        are refused, since they would read the server's own environment and files. The source is merged under the files
+        and checked as a reload would check it before it is written (422 with
+        `error.problems`), then applied here at once and on the other instances within
+        `server.config_poll`. A source in the server's files cannot be written here (409
+        `file_owned`). 201 when it was created. Needs `sources:admin`.
+      parameters:
+        - $ref: "#/components/parameters/source_id"
+        - $ref: "#/components/parameters/if_match"
+        - $ref: "#/components/parameters/if_none_match"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Replaced.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StoredSourceWrite" }
+        "201":
+          description: Created.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StoredSourceWrite" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/RuntimeConflict" }
+        "412": { $ref: "#/components/responses/PreconditionFailed" }
+        "422": { $ref: "#/components/responses/RuntimeInvalid" }
+        "502": { $ref: "#/components/responses/StorageError" }
+    delete:
+      tags: [admin]
+      summary: Remove a source stored in the bucket.
+      operationId: deleteAdminSource
+      description: |
+        Stops it here at once and on the other instances within `server.config_poll`. Its
+        sessions, checkpoint and records stay. Refused while a review policy names it (409
+        `in_use`), and for a source in the server's files (409 `file_owned`). Needs
+        `sources:admin`.
+      parameters:
+        - $ref: "#/components/parameters/source_id"
+        - $ref: "#/components/parameters/if_match"
+      responses:
+        "200":
+          description: Removed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, deleted, version]
+                properties:
+                  id: { type: string }
+                  deleted: { type: boolean }
+                  version: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: "`unknown_source`: no stored source has this id."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409": { $ref: "#/components/responses/RuntimeConflict" }
+        "412": { $ref: "#/components/responses/PreconditionFailed" }
         "502": { $ref: "#/components/responses/StorageError" }
 
   /v1/admin/sources/{id}/{kind}:
@@ -1448,6 +1534,172 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/admin/config:
+    get:
+      tags: [admin]
+      summary: The runtime config in the bucket, and which instances run it.
+      operationId: adminConfig
+      description: |
+        With `server.runtime_config = store` (docs/config.md, "Runtime config in the bucket"):
+        the bucket's runtime config version, the one this instance runs, each live instance
+        and whether it runs the bucket's version, `config/seshi.toml` as stored (its `ETag` in
+        the header) and the other files under `config/`, the settings the server's files set
+        (locked against changes here), and the data policy now in effect. On a file-only
+        server, `runtime_config` is `file` and only `effective` is given. Needs
+        `sources:admin`.
+      parameters:
+        - name: wait
+          in: query
+          required: false
+          description: |
+            Wait up to this long (a duration such as `10s`, at most 60s) for every live
+            instance to run the bucket's version; `converged` says whether they do.
+          schema: { type: string }
+      responses:
+        "200":
+          description: The runtime config, read now.
+          headers:
+            ETag:
+              description: "`config/seshi.toml`'s ETag; absent when the bucket has none."
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RuntimeConfigStatus" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "502": { $ref: "#/components/responses/StorageError" }
+    patch:
+      tags: [admin]
+      summary: Change data-policy settings in the bucket's config/seshi.toml.
+      operationId: patchAdminConfig
+      description: |
+        `set` maps dotted paths under the runtime sections (`default_visibility`, `filter`,
+        `redaction`, `review`, `records`, `capture`) to values; `unset` removes paths. A
+        setting the server's files set is locked (409 `locked`); a list adds to the files'
+        entries. The result is merged under the files and checked as a reload would check it
+        before it is written (422 with `error.problems`), then written with the condition
+        given and applied on this instance at once; the others apply it within
+        `server.config_poll`. Review keys must be `{ env = "NAME" }` references. The file is
+        rewritten, so comments in it are not kept. Needs `sources:admin`.
+      parameters:
+        - $ref: "#/components/parameters/if_match"
+        - $ref: "#/components/parameters/if_none_match"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                set:
+                  type: object
+                  additionalProperties: true
+                  description: Dotted path = value.
+                unset:
+                  type: array
+                  items: { type: string }
+      responses:
+        "200":
+          description: Written and applied here.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RuntimeWrite" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/RuntimeConflict" }
+        "412": { $ref: "#/components/responses/PreconditionFailed" }
+        "422": { $ref: "#/components/responses/RuntimeInvalid" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/admin/config/files/{name}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        description: A file under `config/` (`packs/org.json`), percent-encoded; not `seshi.toml`.
+        schema: { type: string, minLength: 1 }
+    put:
+      tags: [admin]
+      summary: Write a file under config/ (a rule pack, a review prompt).
+      operationId: putAdminConfigFile
+      description: |
+        The body is the file. When `config/seshi.toml` names it, the result is checked as a
+        reload would check it (a pack compiled and its test strings run) before it is
+        written; then applied here at once. Needs `sources:admin`.
+      parameters:
+        - $ref: "#/components/parameters/if_match"
+        - $ref: "#/components/parameters/if_none_match"
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        "200":
+          description: Written and applied here.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RuntimeFileWrite" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/RuntimeConflict" }
+        "412": { $ref: "#/components/responses/PreconditionFailed" }
+        "422": { $ref: "#/components/responses/RuntimeInvalid" }
+        "502": { $ref: "#/components/responses/StorageError" }
+    delete:
+      tags: [admin]
+      summary: Remove a file under config/.
+      operationId: deleteAdminConfigFile
+      description: |
+        Refused (409 `in_use`, with `error.problems`) while the config needs it: the config
+        without it is checked as a reload would check it. Needs `sources:admin`.
+      parameters:
+        - $ref: "#/components/parameters/if_match"
+      responses:
+        "200":
+          description: Removed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RuntimeFileWrite" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: "`no_such_file`: no such file under `config/`."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409": { $ref: "#/components/responses/RuntimeConflict" }
+        "412": { $ref: "#/components/responses/PreconditionFailed" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/admin/secrets/reseal:
+    post:
+      tags: [admin]
+      summary: Seal every stored source's secrets again with the current key.
+      operationId: resealSecrets
+      description: |
+        After `secrets.key_id` names a new key: each stored source sealed with another key is
+        rewritten (each with `If-Match`; one changed meanwhile is skipped and named in
+        `changed`). Run it, then remove the old key. Needs `sources:admin`.
+      responses:
+        "200":
+          description: What was resealed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ResealResult" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/RuntimeConflict" }
+        "422": { $ref: "#/components/responses/RuntimeInvalid" }
         "502": { $ref: "#/components/responses/StorageError" }
 
   /v1/admin/reload:
@@ -1530,6 +1782,18 @@ components:
         caller (X5.12). There are no shared-secret tokens (X5.2).
 
   parameters:
+    if_match:
+      name: If-Match
+      in: header
+      required: false
+      description: The `ETag` read; the write is refused (412) when the object changed since.
+      schema: { type: string }
+    if_none_match:
+      name: If-None-Match
+      in: header
+      required: false
+      description: "`*`: create only; refused (412) when it exists."
+      schema: { type: string, enum: ["*"] }
     format:
       name: format
       in: path
@@ -1581,6 +1845,28 @@ components:
       schema: { type: integer, minimum: 1, default: 7 }
 
   responses:
+    RuntimeConflict:
+      description: |
+        `runtime_config_off` (the server's config is file-only), `locked` (the server's files
+        set it), `file_owned` (a source in the server's files) or `in_use` (something still
+        names it).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    RuntimeInvalid:
+      description: |
+        `invalid`: the change would not load or check; nothing was written. `error.problems`
+        lists each problem. `sealing`: a secret cannot be sealed (no key in `[secrets]`).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    PreconditionFailed:
+      description: |
+        `precondition_failed`: it changed since the `If-Match` ETag was read, or exists despite
+        `If-None-Match: *`. Read it again and redo the change.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
     BadRequest:
       description: |
         The request is malformed: not JSON, a missing or mistyped field, a bad query value,
@@ -1885,6 +2171,114 @@ components:
             - type: "null"
         live_sections: { type: array, items: { type: string } }
         restart_only_sections: { type: array, items: { type: string } }
+        runtime: { $ref: "#/components/schemas/RuntimeHere" }
+    RuntimeHere:
+      type: object
+      description: |
+        With `server.runtime_config = store`: the bucket's runtime config version, the one this
+        instance runs, and why they differ when they do.
+      required: [version, applied, applied_at, last_sync]
+      properties:
+        version: { type: string }
+        applied: { type: string }
+        applied_at: { type: string, format: date-time }
+        last_sync: { type: [string, "null"], format: date-time }
+        problem: { type: string }
+    RuntimeInstance:
+      type: object
+      required: [schema, instance, process, seshi, version, applied_at, at, current]
+      properties:
+        schema: { type: string, const: seshi/runtime-instance/1 }
+        instance: { type: string }
+        process: { type: string }
+        seshi: { type: string }
+        version: { type: string }
+        applied_at: { type: string, format: date-time }
+        at: { type: string, format: date-time }
+        problem: { type: string }
+        current:
+          type: boolean
+          description: It runs the bucket's current version.
+    RuntimeConfigStatus:
+      type: object
+      required: [runtime_config, effective]
+      properties:
+        runtime_config: { type: string, enum: [file, store] }
+        version: { type: string }
+        here: { $ref: "#/components/schemas/RuntimeHere" }
+        converged: { type: boolean }
+        instances:
+          type: array
+          items: { $ref: "#/components/schemas/RuntimeInstance" }
+        doc:
+          type: object
+          required: [settings, files]
+          properties:
+            etag: { type: string }
+            settings:
+              type: object
+              additionalProperties: true
+              description: "`config/seshi.toml` as stored, its paths as written."
+            files:
+              type: array
+              items:
+                type: object
+                required: [name, etag]
+                properties:
+                  name: { type: string }
+                  etag: { type: string }
+        locked:
+          type: array
+          items: { type: string }
+          description: Settings the server's files set, which cannot be changed here.
+        effective:
+          type: object
+          additionalProperties: true
+          description: The data policy in effect on this instance (secrets masked).
+    RuntimeWrite:
+      type: object
+      required: [etag, version]
+      properties:
+        etag: { type: string }
+        version: { type: string }
+    RuntimeFileWrite:
+      type: object
+      required: [name, version]
+      properties:
+        name: { type: string }
+        etag: { type: string }
+        deleted: { type: boolean }
+        version: { type: string }
+    SecretView:
+      type: object
+      description: What may be said of a stored secret; never its value.
+      required: [set, fingerprint, key_id, updated_at]
+      properties:
+        set: { type: boolean, const: true }
+        fingerprint:
+          type: string
+          description: An HMAC of the value under the sealing key, 12 hex digits.
+        key_id: { type: string }
+        updated_at: { type: string, format: date-time }
+    StoredSourceWrite:
+      type: object
+      required: [id, etag, source, version]
+      properties:
+        id: { type: string }
+        etag: { type: string }
+        source:
+          type: object
+          additionalProperties: true
+          description: Its settings, each sealed secret as a `SecretView`.
+        version: { type: string }
+    ResealResult:
+      type: object
+      required: [key_id, resealed, changed, current]
+      properties:
+        key_id: { type: [string, "null"] }
+        resealed: { type: array, items: { type: string } }
+        changed: { type: array, items: { type: string } }
+        current: { type: array, items: { type: string } }
     JobsStatus:
       type: object
       required: [at, deployment, instance, worker, jobs, sources, warnings]
@@ -1978,6 +2372,10 @@ components:
               type: string
               description: Stable, machine-readable; the message is for people.
             message: { type: string }
+            problems:
+              type: array
+              items: { type: string }
+              description: Each thing wrong, one a line, when there are several.
       example:
         error: { code: "unauthorized", message: "a valid token is required" }
 
@@ -2829,6 +3227,52 @@ components:
       type: object
       required: [id, type, enabled, polled, checkpoint, dropped, failed, health]
       properties:
+        id: { type: string }
+        type:
+          type: string
+          description: The source's `type` (`otlp`, `datadog`, `s3`), or `upload`.
+        enabled: { type: boolean }
+        polled:
+          type: boolean
+          description: The worker polls it (enabled, with a connector in this binary).
+        connector: { type: string }
+        interval_ms: { type: integer }
+        note:
+          type: string
+          description: Why it is not polled, when it is not.
+        checkpoint:
+          oneOf:
+            - type: "null"
+            - type: object
+              required: [updated_at, cursor]
+              properties:
+                updated_at: { type: string, format: date-time }
+                cursor: { type: object }
+        dropped: { type: integer, minimum: 0 }
+        failed: { type: integer, minimum: 0 }
+        health:
+          type: object
+          description: Outcome counts over the days asked for (X4.8).
+          additionalProperties: { type: integer }
+
+    SourceDetail:
+      type: object
+      description: "`GET /v1/admin/sources/{id}`: a source's status, and where it is set."
+      required: [id, type, enabled, polled, checkpoint, dropped, failed, health, managed]
+      properties:
+        managed:
+          type: string
+          enum: [file, store, builtin]
+          description: Set in the server's files, stored in the bucket, or built in (`upload`).
+        config:
+          type: object
+          additionalProperties: true
+          description: A stored source's settings, each sealed secret as a `SecretView`.
+        etag: { type: string }
+        updated_at: { type: string, format: date-time }
+        running:
+          type: boolean
+          description: A stored source this instance runs.
         id: { type: string }
         type:
           type: string

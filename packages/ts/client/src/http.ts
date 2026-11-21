@@ -37,10 +37,13 @@ import type {
   RecordsPage,
   ReloadReport,
   ReviewDecision,
+  RuntimeConfigStatus,
+  SourceDetail,
   SourceStatus,
   TokenInfo,
   TokenKind,
   TokenRequest,
+  WriteCondition,
 } from "./types";
 
 /** How a client reaches the server, with or without a credential. */
@@ -90,12 +93,37 @@ export class ServerError extends Error {
   }
 }
 
+/** A conditional runtime config write whose condition did not hold: it changed since its ETag
+ * was read, or exists when created. Read it again and redo the change. */
+export class PreconditionFailed extends Error {
+  readonly code = "precondition_failed";
+  constructor(message: string) {
+    super(message);
+    this.name = "PreconditionFailed";
+  }
+}
+
+/** A runtime config change the server refused before writing anything (`invalid`, `sealing`),
+ * with each problem. */
+export class ConfigRejected extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly problems: string[],
+  ) {
+    super(message);
+    this.name = "ConfigRejected";
+  }
+}
+
 interface ErrorBody {
-  error?: { code?: string; message?: string; expected?: number };
+  error?: { code?: string; message?: string; expected?: number; problems?: string[] };
 }
 
 interface RequestOptions {
   body?: unknown;
+  /** Sent as it is (`application/octet-stream`), instead of `body` as JSON. */
+  content?: Uint8Array;
   query?: Record<string, string | number | boolean | readonly string[] | undefined>;
   headers?: Record<string, string>;
   gzipFrom?: number;
@@ -126,7 +154,10 @@ async function send(
     ...options.headers,
   };
   let body: BodyInit | undefined;
-  if (options.body !== undefined) {
+  if (options.content !== undefined) {
+    headers["content-type"] = "application/octet-stream";
+    body = new Uint8Array(options.content);
+  } else if (options.body !== undefined) {
     headers["content-type"] = "application/json";
     const json = new TextEncoder().encode(JSON.stringify(options.body));
     if (json.length >= (options.gzipFrom ?? Number.POSITIVE_INFINITY)) {
@@ -179,6 +210,28 @@ function refuse(status: number, body: unknown, offset = 0): never {
   if (status === 422) throw new SessionRejected(code, message);
   if (status === 502) throw new StoreError(message);
   throw new ServerError(status, code, message);
+}
+
+/** A runtime config write's refusal: 412 and 422 as their own errors, the rest as `refuse`. */
+function refuseChange(status: number, body: unknown): never {
+  const error = (body as ErrorBody | null)?.error ?? {};
+  const message = error.message ?? `HTTP ${status}`;
+  if (status === 412) throw new PreconditionFailed(message);
+  if (status === 422)
+    throw new ConfigRejected(error.code ?? "invalid", message, error.problems ?? []);
+  refuse(status, body);
+}
+
+function conditionHeaders(condition: WriteCondition = {}): Record<string, string> {
+  if (condition.ifMatch !== undefined && condition.create) {
+    throw new TypeError("pass ifMatch or create, not both");
+  }
+  if (condition.ifMatch !== undefined) {
+    return {
+      "if-match": condition.ifMatch.startsWith('"') ? condition.ifMatch : `"${condition.ifMatch}"`,
+    };
+  }
+  return condition.create ? { "if-none-match": "*" } : {};
 }
 
 /** `GET /v1/auth/config`: whether the server takes the org key and which IdP it signs in
@@ -575,7 +628,7 @@ export class HttpSeshi implements Seshi {
   }
 
   /** One source's status; null for an unknown source. */
-  async source(id: string, options: { days?: number } = {}): Promise<SourceStatus | null> {
+  async source(id: string, options: { days?: number } = {}): Promise<SourceDetail | null> {
     const { status, body } = await this.request(
       "GET",
       `/v1/admin/sources/${encodeURIComponent(id)}`,
@@ -583,7 +636,7 @@ export class HttpSeshi implements Seshi {
     );
     if (status === 404 && errorCode(body) === "unknown_source") return null;
     if (status !== 200) refuse(status, body);
-    return body as SourceStatus;
+    return body as SourceDetail;
   }
 
   /** A source's failure or drop records, oldest first (X6.4); null for an unknown source. */
@@ -600,5 +653,115 @@ export class HttpSeshi implements Seshi {
     if (status === 404 && errorCode(body) === "unknown_source") return null;
     if (status !== 200) refuse(status, body);
     return body as RecordsPage;
+  }
+
+  // The runtime config (server.runtime_config = store; docs/config.md, "Runtime config in the
+  // bucket"). Each write is checked as a reload would check it before anything is written
+  // (`ConfigRejected`), made under its condition (`PreconditionFailed`), and applied on the
+  // server that took it at once; the other instances apply it within `server.config_poll`.
+
+  /** The bucket's runtime config, its version, the settings the files lock, and which live
+   * instances run it; `wait` (`"30s"`) waits for them all to. */
+  async runtimeConfig(options: { wait?: string } = {}): Promise<RuntimeConfigStatus> {
+    const { status, body } = await this.request("GET", "/v1/admin/config", {
+      query: { wait: options.wait },
+    });
+    if (status !== 200) refuse(status, body);
+    return body as RuntimeConfigStatus;
+  }
+
+  /** Change data-policy settings in `config/seshi.toml`: `set` maps dotted paths to values,
+   * `unset` removes paths. */
+  async patchRuntimeConfig(
+    change: { set?: Record<string, unknown>; unset?: string[] },
+    condition: WriteCondition = {},
+  ): Promise<{ etag: string; version: string }> {
+    const { status, body } = await this.request("PATCH", "/v1/admin/config", {
+      body: change,
+      headers: conditionHeaders(condition),
+    });
+    if (status !== 200) refuseChange(status, body);
+    return body as { etag: string; version: string };
+  }
+
+  /** Write a file under `config/` (`packs/org.json`), checked when the doc names it. */
+  async putConfigFile(
+    name: string,
+    content: Uint8Array | string,
+    condition: WriteCondition = {},
+  ): Promise<{ name: string; etag?: string; version: string }> {
+    const { status, body } = await this.request(
+      "PUT",
+      `/v1/admin/config/files/${encodeURIComponent(name)}`,
+      {
+        content: typeof content === "string" ? new TextEncoder().encode(content) : content,
+        headers: conditionHeaders(condition),
+      },
+    );
+    if (status !== 200) refuseChange(status, body);
+    return body as { name: string; etag?: string; version: string };
+  }
+
+  /** Remove a file under `config/`; null when there is none. */
+  async deleteConfigFile(
+    name: string,
+    condition: { ifMatch?: string } = {},
+  ): Promise<{ name: string; deleted: boolean; version: string } | null> {
+    const { status, body } = await this.request(
+      "DELETE",
+      `/v1/admin/config/files/${encodeURIComponent(name)}`,
+      { headers: conditionHeaders(condition) },
+    );
+    if (status === 404 && errorCode(body) === "no_such_file") return null;
+    if (status !== 200) refuseChange(status, body);
+    return body as { name: string; deleted: boolean; version: string };
+  }
+
+  /** Store source `id` in the bucket: its settings as in `[[sources]]`. Secret values are
+   * sealed and never returned; one left out keeps its sealed value when the type stays. */
+  async putSource(
+    id: string,
+    source: Record<string, unknown>,
+    condition: WriteCondition = {},
+  ): Promise<{ id: string; etag: string; source: Record<string, unknown>; version: string }> {
+    const { status, body } = await this.request(
+      "PUT",
+      `/v1/admin/sources/${encodeURIComponent(id)}`,
+      { body: source, headers: conditionHeaders(condition) },
+    );
+    if (status !== 200 && status !== 201) refuseChange(status, body);
+    return body as { id: string; etag: string; source: Record<string, unknown>; version: string };
+  }
+
+  /** Remove a stored source; null when there is none. Its sessions and checkpoint stay. */
+  async deleteSource(
+    id: string,
+    condition: { ifMatch?: string } = {},
+  ): Promise<{ id: string; deleted: boolean; version: string } | null> {
+    const { status, body } = await this.request(
+      "DELETE",
+      `/v1/admin/sources/${encodeURIComponent(id)}`,
+      { headers: conditionHeaders(condition) },
+    );
+    if (status === 404 && errorCode(body) === "unknown_source") return null;
+    if (status !== 200) refuseChange(status, body);
+    return body as { id: string; deleted: boolean; version: string };
+  }
+
+  /** Seal every stored source's secrets again with `secrets.key_id`'s key. */
+  async resealSecrets(): Promise<{
+    key_id: string | null;
+    resealed: string[];
+    changed: string[];
+    current: string[];
+  }> {
+    const { status, body } = await this.request("POST", "/v1/admin/secrets/reseal");
+    if (status !== 200) refuseChange(status, body);
+    return body as {
+      key_id: string | null;
+      resealed: string[];
+      changed: string[];
+      current: string[];
+    };
   }
 }
