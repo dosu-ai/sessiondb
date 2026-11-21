@@ -46,6 +46,7 @@ Start with the [README](../README.md) for what it is, the
 | [releasing.md](releasing.md) | What a release does, and trying one locally |
 | [seshi/design-decisions.html](seshi/design-decisions.html) | Every agreed decision; the IDs in these pages (X4.3, F9.7, B1.5) point into it |
 | [seshi/build/](seshi/build/README.md) | How the decisions were built, branch by branch |
+| [seshi/decision-models.md](seshi/decision-models.md) | Scope: Jev and OpenAI Decisions as the review decision step |
 | [../brand/](../brand/README.md) | The Threadling brand: glyph, lockups, poses, colour tokens |
 
 ## History
